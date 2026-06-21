@@ -44,13 +44,22 @@ async fn reload_kubeconfig(
     let mut app = state.write().await;
     match ContextManager::load(path.as_deref()) {
         Ok(ctx_mgr) => {
+            let kubeconfig = ctx_mgr.kubeconfig().await;
             app.ctx_mgr = Some(ctx_mgr);
             app.config_error = None;
-            let _ = app.client_pool.refresh().await;
-            Ok(KubeconfigStatus {
-                configured: true,
-                error: None,
-            })
+            match app.client_pool.refresh_with_config(&kubeconfig).await {
+                Ok(_) => Ok(KubeconfigStatus {
+                    configured: true,
+                    error: None,
+                }),
+                Err(e) => {
+                    app.config_error = Some(e.clone());
+                    Ok(KubeconfigStatus {
+                        configured: true,
+                        error: Some(e),
+                    })
+                }
+            }
         }
         Err(e) => {
             app.ctx_mgr = None;
@@ -82,7 +91,11 @@ async fn switch_context(
     match &app.ctx_mgr {
         Some(mgr) => {
             mgr.switch_context(&context_name).await?;
-            app.client_pool.refresh().await.map_err(|e| e.to_string())?;
+            let kubeconfig = mgr.kubeconfig().await;
+            app.client_pool
+                .refresh_with_config(&kubeconfig)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(())
         }
         None => Err("Kubeconfig not configured".to_string()),
