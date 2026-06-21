@@ -2,9 +2,12 @@
 
 mod client;
 mod context;
+mod events;
+mod resources;
 
 use client::ClientPool;
 use context::{ContextInfo, ContextManager};
+use resources::ResourceItem;
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::RwLock;
@@ -39,6 +42,35 @@ async fn get_active_context(
     Ok(app.ctx_mgr.active_context_name().await)
 }
 
+#[tauri::command]
+async fn get_resources(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    kind: String,
+    namespace: Option<String>,
+) -> Result<Vec<ResourceItem>, String> {
+    let app = state.read().await;
+    let client = app
+        .client_pool
+        .get_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    resources::list_resources(&client, &kind, namespace.as_deref()).await
+}
+
+#[tauri::command]
+async fn get_pod_names(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    namespace: String,
+) -> Result<Vec<String>, String> {
+    let app = state.read().await;
+    let client = app
+        .client_pool
+        .get_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    resources::get_pod_names(&client, &namespace).await
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -60,6 +92,8 @@ fn main() {
             get_contexts,
             switch_context,
             get_active_context,
+            get_resources,
+            get_pod_names,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
