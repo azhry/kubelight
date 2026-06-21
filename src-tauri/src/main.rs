@@ -3,13 +3,15 @@
 mod client;
 mod context;
 mod events;
+mod logs;
 mod resources;
 
 use client::ClientPool;
 use context::{ContextInfo, ContextManager};
+
 use resources::ResourceItem;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 use tokio::sync::RwLock;
 
 struct AppState {
@@ -71,6 +73,34 @@ async fn get_pod_names(
     resources::get_pod_names(&client, &namespace).await
 }
 
+#[tauri::command]
+async fn stream_pod_logs(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+    namespace: String,
+    pod_name: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    let client = {
+        let app = state.read().await;
+        app.client_pool
+            .get_or_init()
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    use tokio_stream::StreamExt;
+    let mut log_stream = logs::stream_logs(client, namespace, pod_name, container);
+
+    tokio::spawn(async move {
+        while let Some(line) = log_stream.next().await {
+            let _ = app_handle.emit("log-line", &line);
+        }
+    });
+
+    Ok(())
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -94,6 +124,7 @@ fn main() {
             get_active_context,
             get_resources,
             get_pod_names,
+            stream_pod_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
