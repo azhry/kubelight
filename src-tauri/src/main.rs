@@ -4,11 +4,11 @@ mod client;
 mod context;
 mod events;
 mod logs;
+mod operations;
 mod resources;
 
 use client::ClientPool;
 use context::{ContextInfo, ContextManager};
-
 use resources::ResourceItem;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -101,6 +101,55 @@ async fn stream_pod_logs(
     Ok(())
 }
 
+#[tauri::command]
+async fn patch_resource(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    kind: String,
+    namespace: Option<String>,
+    name: String,
+    patch_body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let app = state.read().await;
+    let client = app
+        .client_pool
+        .get_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    operations::patch_resource(&client, &kind, namespace.as_deref(), &name, patch_body).await
+}
+
+#[tauri::command]
+async fn scale_deployment(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    namespace: String,
+    name: String,
+    replicas: i32,
+) -> Result<serde_json::Value, String> {
+    let app = state.read().await;
+    let client = app
+        .client_pool
+        .get_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    operations::scale_deployment(&client, &namespace, &name, replicas).await
+}
+
+#[tauri::command]
+async fn get_resource_yaml(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    kind: String,
+    namespace: Option<String>,
+    name: String,
+) -> Result<String, String> {
+    let app = state.read().await;
+    let client = app
+        .client_pool
+        .get_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    operations::get_resource_yaml(&client, &kind, namespace.as_deref(), &name).await
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -125,6 +174,9 @@ fn main() {
             get_resources,
             get_pod_names,
             stream_pod_logs,
+            patch_resource,
+            scale_deployment,
+            get_resource_yaml,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
