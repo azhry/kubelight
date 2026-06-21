@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../lib/utils";
 import { StatusBadge } from "./status-badge";
@@ -31,6 +32,7 @@ export function ResourceTable({
   error: string | null;
   kind: string;
 }) {
+  const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
 
@@ -115,6 +117,11 @@ export function ResourceTable({
             <tr
               key={item.name}
               className="border-b border-border/50 hover:bg-accent/30 transition-colors cursor-pointer"
+              onClick={() => {
+                if (kind === "pods") {
+                  navigate(`/pods/${item.namespace || "default"}/${item.name}`);
+                }
+              }}
             >
               <td className="px-4 py-3 font-medium">{item.name}</td>
               <td className="px-4 py-3 text-muted-foreground">
