@@ -1,8 +1,7 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { useResources } from "./use-resources";
-import type { ResourceItem } from "./use-resources";
 
 export function useYamlEditor(kind: string, namespace: string | undefined) {
   const [yamlStr, setYamlStr] = useState<string>("");

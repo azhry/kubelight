@@ -22,6 +22,19 @@ impl ContextManager {
     pub fn new() -> Result<Self, KubeconfigError> {
         let kubeconfig = Kubeconfig::from_env()?
             .ok_or(KubeconfigError::FindPath)?;
+        Self::from_kubeconfig(kubeconfig)
+    }
+
+    pub fn load(path: Option<&str>) -> Result<Self, KubeconfigError> {
+        let kubeconfig = match path {
+            Some(p) => Kubeconfig::read_from(std::path::Path::new(p))?,
+            None => Kubeconfig::from_env()?
+                .ok_or(KubeconfigError::FindPath)?,
+        };
+        Self::from_kubeconfig(kubeconfig)
+    }
+
+    fn from_kubeconfig(kubeconfig: Kubeconfig) -> Result<Self, KubeconfigError> {
         let active = kubeconfig
             .current_context
             .clone()
@@ -71,6 +84,7 @@ impl ContextManager {
         self.active_context.read().await.clone()
     }
 
+    #[allow(dead_code)]
     pub async fn active_namespace(&self) -> String {
         let config = self.config.read().await;
         let active = self.active_context.read().await;

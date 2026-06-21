@@ -30,7 +30,4 @@ impl ClientPool {
         Ok(client)
     }
 
-    pub async fn get(&self) -> Option<Client> {
-        self.current.read().await.clone()
-    }
 }

@@ -5,7 +5,7 @@ import { toast } from "../components/toast";
 
 const MAX_ROWS = 1500;
 
-interface LogLine {
+export interface LogLine {
   line: string;
   timestamp: string;
 }
