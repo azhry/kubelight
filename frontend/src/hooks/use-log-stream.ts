@@ -50,6 +50,10 @@ export function useLogStream(namespace: string, podName: string, container?: str
     setStreaming(false);
   }, []);
 
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (unlistenRef.current) {
@@ -58,5 +62,5 @@ export function useLogStream(namespace: string, podName: string, container?: str
     };
   }, []);
 
-  return { logs, streaming, startStream, stopStream };
+  return { logs, streaming, startStream, stopStream, clearLogs };
 }
