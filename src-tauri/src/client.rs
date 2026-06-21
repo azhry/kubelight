@@ -1,4 +1,5 @@
 use kube::Client;
+use kube::config::{Config, Kubeconfig};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -23,11 +24,13 @@ impl ClientPool {
         Ok(client)
     }
 
-    pub async fn refresh(&self) -> Result<Client, kube::Error> {
-        let client = Client::try_default().await?;
+    pub async fn refresh_with_config(&self, kubeconfig: &Kubeconfig) -> Result<Client, String> {
+        let config = Config::from_custom_kubeconfig(kubeconfig.clone(), &Default::default())
+            .await
+            .map_err(|e| e.to_string())?;
+        let client = Client::try_from(config).map_err(|e| e.to_string())?;
         let mut guard = self.current.write().await;
         *guard = Some(client.clone());
         Ok(client)
     }
-
 }

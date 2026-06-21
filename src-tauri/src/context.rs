@@ -70,11 +70,12 @@ impl ContextManager {
     }
 
     pub async fn switch_context(&self, context_name: &str) -> Result<(), String> {
-        let config = self.config.read().await;
+        let mut config = self.config.write().await;
         let exists = config.contexts.iter().any(|c| c.name == context_name);
         if !exists {
             return Err(format!("Context '{}' not found in kubeconfig", context_name));
         }
+        config.current_context = Some(context_name.to_string());
         let mut active = self.active_context.write().await;
         *active = context_name.to_string();
         Ok(())
@@ -82,6 +83,10 @@ impl ContextManager {
 
     pub async fn active_context_name(&self) -> String {
         self.active_context.read().await.clone()
+    }
+
+    pub async fn kubeconfig(&self) -> Kubeconfig {
+        self.config.read().await.clone()
     }
 
     #[allow(dead_code)]
