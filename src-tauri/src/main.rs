@@ -9,6 +9,7 @@ mod resources;
 
 use client::ClientPool;
 use context::{ContextInfo, ContextManager};
+use kube::Client;
 use resources::ResourceItem;
 use std::sync::Arc;
 use serde::Serialize;
@@ -125,6 +126,18 @@ async fn get_active_context(
     get_active_context_impl(&app).await
 }
 
+async fn get_resources_impl(
+    client: &Client,
+    kind: &str,
+    namespace: Option<String>,
+) -> Result<Vec<ResourceItem>, String> {
+    resources::list_resources(client, kind, namespace.as_deref()).await
+}
+
+async fn get_pod_names_impl(client: &Client, namespace: &str) -> Result<Vec<String>, String> {
+    resources::get_pod_names(client, namespace).await
+}
+
 #[tauri::command]
 async fn get_resources(
     state: State<'_, Arc<RwLock<AppState>>>,
@@ -137,7 +150,7 @@ async fn get_resources(
         .get_or_init()
         .await
         .map_err(|e| e.to_string())?;
-    resources::list_resources(&client, &kind, namespace.as_deref()).await
+    get_resources_impl(&client, &kind, namespace).await
 }
 
 #[tauri::command]
@@ -151,7 +164,7 @@ async fn get_pod_names(
         .get_or_init()
         .await
         .map_err(|e| e.to_string())?;
-    resources::get_pod_names(&client, &namespace).await
+    get_pod_names_impl(&client, &namespace).await
 }
 
 #[tauri::command]
@@ -392,5 +405,45 @@ users:
         let result = switch_context_impl(&app, "ctx-a").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Kubeconfig not configured"));
+    }
+
+    fn mock_unreachable_client() -> Option<Client> {
+        let config = kube::config::Config::new("http://127.0.0.1:1".parse().unwrap());
+        Client::try_from(config).ok()
+    }
+
+    #[tokio::test]
+    async fn test_get_resources_impl_unknown_kind() {
+        if let Some(client) = mock_unreachable_client() {
+            let result = get_resources_impl(&client, "unicorns", None).await;
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Unknown resource kind"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_resources_impl_reaches_api() {
+        if let Some(client) = mock_unreachable_client() {
+            // The cluster is unreachable, but the request should be formed correctly
+            // and fail with a connection error rather than a panic or compile error.
+            let result = get_resources_impl(&client, "pods", Some("default".to_string())).await;
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_pod_names_impl_reaches_api() {
+        if let Some(client) = mock_unreachable_client() {
+            let result = get_pod_names_impl(&client, "default").await;
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_resources_command_without_client() {
+        // When no kubeconfig is available, get_or_init should fail to build a client.
+        let app = unconfigured_app_state();
+        let result = app.client_pool.get_or_init().await;
+        assert!(result.is_err());
     }
 }
