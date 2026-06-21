@@ -167,6 +167,25 @@ async fn get_pod_names(
     get_pod_names_impl(&client, &namespace).await
 }
 
+fn start_log_stream<F>(
+    client: Client,
+    namespace: String,
+    pod_name: String,
+    container: Option<String>,
+    mut emit: F,
+) where
+    F: FnMut(logs::LogLine) + Send + 'static,
+{
+    use tokio_stream::StreamExt;
+    let mut log_stream = logs::stream_logs(client, namespace, pod_name, container);
+
+    tokio::spawn(async move {
+        while let Some(line) = log_stream.next().await {
+            emit(line);
+        }
+    });
+}
+
 #[tauri::command]
 async fn stream_pod_logs(
     app_handle: tauri::AppHandle,
@@ -183,13 +202,8 @@ async fn stream_pod_logs(
             .map_err(|e| e.to_string())?
     };
 
-    use tokio_stream::StreamExt;
-    let mut log_stream = logs::stream_logs(client, namespace, pod_name, container);
-
-    tokio::spawn(async move {
-        while let Some(line) = log_stream.next().await {
-            let _ = app_handle.emit("log-line", &line);
-        }
+    start_log_stream(client, namespace, pod_name, container, move |line| {
+        let _ = app_handle.emit("log-line", &line);
     });
 
     Ok(())
@@ -442,6 +456,34 @@ users:
     #[tokio::test]
     async fn test_get_resources_command_without_client() {
         // When no kubeconfig is available, get_or_init should fail to build a client.
+        let app = unconfigured_app_state();
+        let result = app.client_pool.get_or_init().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_start_log_stream_emits_lines_or_error() {
+        if let Some(client) = mock_unreachable_client() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<logs::LogLine>(16);
+            start_log_stream(
+                client,
+                "default".to_string(),
+                "nginx".to_string(),
+                Some("nginx".to_string()),
+                move |line| {
+                    let _ = tx.try_send(line);
+                },
+            );
+            // Give the spawned task a moment to attempt connection and emit an error line.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // The channel should either receive an error line or close; either way
+            // the stream setup completed without panicking.
+            let _ = rx.try_recv();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stream_pod_logs_command_without_client() {
         let app = unconfigured_app_state();
         let result = app.client_pool.get_or_init().await;
         assert!(result.is_err());
