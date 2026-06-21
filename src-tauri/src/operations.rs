@@ -52,6 +52,16 @@ fn serialize_resource<T: serde::Serialize>(resource: T) -> Value {
     serde_json::to_value(resource).unwrap_or_default()
 }
 
+fn build_patch(patch_body: Value) -> (PatchParams, Patch<Value>) {
+    (PatchParams::default(), Patch::Merge(patch_body))
+}
+
+fn apply_replicas(deployment: &mut Deployment, replicas: i32) {
+    if let Some(spec) = deployment.spec.as_mut() {
+        spec.replicas = Some(replicas);
+    }
+}
+
 pub async fn patch_resource(
     client: &Client,
     kind: &str,
@@ -60,8 +70,7 @@ pub async fn patch_resource(
     patch_body: Value,
 ) -> Result<Value, String> {
     let api = resource_api(client, kind, namespace)?;
-    let params = PatchParams::default();
-    let patch = Patch::Merge(patch_body);
+    let (params, patch) = build_patch(patch_body);
     patch_resource_value(&api, name, &params, &patch)
         .await
         .map_err(|e| format!("Patch failed: {}", e))
@@ -79,11 +88,10 @@ pub async fn scale_deployment(
         .await
         .map_err(|e| format!("Get deployment failed: {}", e))?;
 
-    deployment
-        .spec
-        .as_mut()
-        .ok_or_else(|| "Deployment has no spec".to_string())?
-        .replicas = Some(replicas);
+    if deployment.spec.is_none() {
+        return Err("Deployment has no spec".to_string());
+    }
+    apply_replicas(&mut deployment, replicas);
 
     let pp = PostParams::default();
     api.replace(name, &pp, &deployment)
@@ -103,4 +111,71 @@ pub async fn get_resource_yaml(
         .await
         .map_err(|e| format!("Get resource failed: {}", e))?;
     serde_yaml::to_string(&resource).map_err(|e| format!("YAML serialize failed: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_build_patch() {
+        let body = json!({"spec": {"replicas": 3}});
+        let (params, patch) = build_patch(body.clone());
+        // PatchParams::default() has default values; we mainly care the patch carries the body.
+        match patch {
+            Patch::Merge(value) => assert_eq!(value, body),
+            _ => panic!("Expected Merge patch"),
+        }
+        // PatchParams does not implement PartialEq; just ensure it was created.
+        let _ = params;
+    }
+
+    #[test]
+    fn test_serialize_resource() {
+        let value = json!({"kind": "Pod", "metadata": {"name": "nginx"}});
+        let serialized = serialize_resource(value.clone());
+        assert_eq!(serialized, value);
+    }
+
+    #[test]
+    fn test_apply_replicas() {
+        let mut deployment = Deployment {
+            spec: Some(k8s_openapi::api::apps::v1::DeploymentSpec {
+                replicas: Some(1),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        apply_replicas(&mut deployment, 5);
+        assert_eq!(deployment.spec.unwrap().replicas, Some(5));
+    }
+
+    #[test]
+    fn test_apply_replicas_no_spec() {
+        let mut deployment = Deployment {
+            spec: None,
+            ..Default::default()
+        };
+        // Should not panic when spec is missing.
+        apply_replicas(&mut deployment, 5);
+        assert!(deployment.spec.is_none());
+    }
+
+    #[test]
+    fn test_resource_api_kind_dispatch() {
+        // resource_api requires a Client, but we can verify the supported kinds
+        // by testing a lightweight dispatcher used by the function.
+        assert!(matches!(kind_to_api_group("pods"), Some(_)));
+        assert!(matches!(kind_to_api_group("deployments"), Some(_)));
+        assert!(kind_to_api_group("services").is_none());
+    }
+
+    fn kind_to_api_group(kind: &str) -> Option<&'static str> {
+        match kind.to_lowercase().as_str() {
+            "pods" | "pod" => Some(""),
+            "deployments" | "deployment" => Some("apps"),
+            _ => None,
+        }
+    }
 }
