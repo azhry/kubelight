@@ -10,7 +10,7 @@ import { ResourceListPage } from "./pages/resource-list-page";
 import { PodDetailPage } from "./pages/pod-detail-page";
 import { YamlEditorPage } from "./pages/yaml-editor-page";
 
-function AppLayout() {
+export function AppLayout() {
   return (
     <div className="dark min-h-screen bg-background text-foreground flex flex-col">
       <ToastContainer />
