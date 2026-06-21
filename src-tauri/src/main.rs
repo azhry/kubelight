@@ -209,6 +209,34 @@ async fn stream_pod_logs(
     Ok(())
 }
 
+async fn patch_resource_impl(
+    client: &Client,
+    kind: &str,
+    namespace: Option<String>,
+    name: &str,
+    patch_body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    operations::patch_resource(client, kind, namespace.as_deref(), name, patch_body).await
+}
+
+async fn scale_deployment_impl(
+    client: &Client,
+    namespace: &str,
+    name: &str,
+    replicas: i32,
+) -> Result<serde_json::Value, String> {
+    operations::scale_deployment(client, namespace, name, replicas).await
+}
+
+async fn get_resource_yaml_impl(
+    client: &Client,
+    kind: &str,
+    namespace: Option<String>,
+    name: &str,
+) -> Result<String, String> {
+    operations::get_resource_yaml(client, kind, namespace.as_deref(), name).await
+}
+
 #[tauri::command]
 async fn patch_resource(
     state: State<'_, Arc<RwLock<AppState>>>,
@@ -223,7 +251,7 @@ async fn patch_resource(
         .get_or_init()
         .await
         .map_err(|e| e.to_string())?;
-    operations::patch_resource(&client, &kind, namespace.as_deref(), &name, patch_body).await
+    patch_resource_impl(&client, &kind, namespace, &name, patch_body).await
 }
 
 #[tauri::command]
@@ -239,7 +267,7 @@ async fn scale_deployment(
         .get_or_init()
         .await
         .map_err(|e| e.to_string())?;
-    operations::scale_deployment(&client, &namespace, &name, replicas).await
+    scale_deployment_impl(&client, &namespace, &name, replicas).await
 }
 
 #[tauri::command]
@@ -255,7 +283,7 @@ async fn get_resource_yaml(
         .get_or_init()
         .await
         .map_err(|e| e.to_string())?;
-    operations::get_resource_yaml(&client, &kind, namespace.as_deref(), &name).await
+    get_resource_yaml_impl(&client, &kind, namespace, &name).await
 }
 
 fn main() {
@@ -484,6 +512,38 @@ users:
 
     #[tokio::test]
     async fn test_stream_pod_logs_command_without_client() {
+        let app = unconfigured_app_state();
+        let result = app.client_pool.get_or_init().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_patch_resource_impl_with_mock_client() {
+        if let Some(client) = mock_unreachable_client() {
+            let patch = serde_json::json!({"spec": {"replicas": 3}});
+            let result = patch_resource_impl(&client, "deployments", Some("default".to_string()), "api", patch).await;
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scale_deployment_impl_with_mock_client() {
+        if let Some(client) = mock_unreachable_client() {
+            let result = scale_deployment_impl(&client, "default", "api", 3).await;
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_resource_yaml_impl_with_mock_client() {
+        if let Some(client) = mock_unreachable_client() {
+            let result = get_resource_yaml_impl(&client, "pods", Some("default".to_string()), "nginx").await;
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_operations_command_without_client() {
         let app = unconfigured_app_state();
         let result = app.client_pool.get_or_init().await;
         assert!(result.is_err());
