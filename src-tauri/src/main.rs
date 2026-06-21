@@ -28,18 +28,16 @@ struct KubeconfigStatus {
     error: Option<String>,
 }
 
-#[tauri::command]
-async fn get_kubeconfig_status(state: State<'_, Arc<RwLock<AppState>>>) -> Result<KubeconfigStatus, String> {
+async fn get_kubeconfig_status_impl(state: Arc<RwLock<AppState>>) -> KubeconfigStatus {
     let app = state.read().await;
-    Ok(KubeconfigStatus {
+    KubeconfigStatus {
         configured: app.ctx_mgr.is_some(),
         error: app.config_error.clone(),
-    })
+    }
 }
 
-#[tauri::command]
-async fn reload_kubeconfig(
-    state: State<'_, Arc<RwLock<AppState>>>,
+async fn reload_kubeconfig_impl(
+    state: Arc<RwLock<AppState>>,
     path: Option<String>,
 ) -> Result<KubeconfigStatus, String> {
     let mut app = state.write().await;
@@ -72,6 +70,19 @@ async fn reload_kubeconfig(
             })
         }
     }
+}
+
+#[tauri::command]
+async fn get_kubeconfig_status(state: State<'_, Arc<RwLock<AppState>>>) -> Result<KubeconfigStatus, String> {
+    Ok(get_kubeconfig_status_impl(state.inner().clone()).await)
+}
+
+#[tauri::command]
+async fn reload_kubeconfig(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    path: Option<String>,
+) -> Result<KubeconfigStatus, String> {
+    reload_kubeconfig_impl(state.inner().clone(), path).await
 }
 
 async fn get_contexts_impl(app: &AppState) -> Result<Vec<ContextInfo>, String> {
@@ -547,5 +558,66 @@ users:
         let app = unconfigured_app_state();
         let result = app.client_pool.get_or_init().await;
         assert!(result.is_err());
+    }
+
+    fn app_state_arc(app: AppState) -> Arc<RwLock<AppState>> {
+        Arc::new(RwLock::new(app))
+    }
+
+    #[tokio::test]
+    async fn test_get_kubeconfig_status_unconfigured() {
+        let state = app_state_arc(unconfigured_app_state());
+        let status = get_kubeconfig_status_impl(state).await;
+        assert!(!status.configured);
+        assert!(status.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_kubeconfig_status_configured() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap());
+        let state = app_state_arc(app);
+        let status = get_kubeconfig_status_impl(state).await;
+        assert!(status.configured);
+        assert!(status.error.is_none());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_reload_kubeconfig_valid_path() {
+        let state = app_state_arc(unconfigured_app_state());
+        let path = write_temp_config(sample_kubeconfig());
+        let status = reload_kubeconfig_impl(state.clone(), Some(path.to_str().unwrap().to_string()))
+            .await
+            .unwrap();
+        assert!(status.configured);
+        let app = state.read().await;
+        assert!(app.ctx_mgr.is_some());
+        assert!(app.client_pool.has_client().await);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_reload_kubeconfig_invalid_path() {
+        let state = app_state_arc(unconfigured_app_state());
+        let status = reload_kubeconfig_impl(state.clone(), Some("/nonexistent/kubeconfig.yaml".to_string()))
+            .await
+            .unwrap();
+        assert!(!status.configured);
+        assert!(status.error.is_some());
+        let app = state.read().await;
+        assert!(app.ctx_mgr.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_client_pool_uses_reloaded_config() {
+        let state = app_state_arc(unconfigured_app_state());
+        let path = write_temp_config(sample_kubeconfig());
+        reload_kubeconfig_impl(state.clone(), Some(path.to_str().unwrap().to_string()))
+            .await
+            .unwrap();
+        let app = state.read().await;
+        assert!(app.client_pool.has_client().await);
+        std::fs::remove_file(path).ok();
     }
 }
