@@ -86,7 +86,7 @@ async fn send_event(
     tx: &mpsc::Sender<KubeEvent>,
     ev: &Event,
     event_type: &str,
-    namespace: &Option<String>,
+    _namespace: &Option<String>,
 ) {
     let _ = tx
         .send(KubeEvent {
