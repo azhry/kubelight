@@ -7,11 +7,12 @@ import {
   FileText,
   Key,
   Activity,
+  Code,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { resourceKinds } from "../lib/resource-kinds";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const iconMap: Record<string, React.ReactNode> = {
   Box: <Box className="h-4 w-4" />,
@@ -26,7 +27,9 @@ const iconMap: Record<string, React.ReactNode> = {
 
 export function Sidebar() {
   const navigate = useNavigate();
-  const { kind: activeKind } = useParams();
+  const location = useLocation();
+  const isYamlPage = location.pathname.startsWith("/yaml");
+  const activeKind = isYamlPage ? undefined : location.pathname.slice(1);
 
   return (
     <aside className="w-60 border-r border-border bg-card flex flex-col">
@@ -61,6 +64,21 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="border-t border-border p-2">
+        <button
+          onClick={() => navigate("/yaml/pods")}
+          className={cn(
+            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+            isYamlPage
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          )}
+        >
+          <Code className="h-4 w-4" />
+          <span className="flex-1 text-left">YAML Editor</span>
+        </button>
+      </div>
     </aside>
   );
 }

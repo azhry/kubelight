@@ -5,6 +5,7 @@ import { NamespaceFilter } from "./components/namespace-filter";
 import { Sidebar } from "./components/sidebar";
 import { ResourceListPage } from "./pages/resource-list-page";
 import { PodDetailPage } from "./pages/pod-detail-page";
+import { YamlEditorPage } from "./pages/yaml-editor-page";
 
 function AppLayout() {
   return (
@@ -28,6 +29,7 @@ function AppLayout() {
           <Routes>
             <Route path="/:kind" element={<ResourceListPage />} />
             <Route path="/pods/:namespace/:name" element={<PodDetailPage />} />
+            <Route path="/yaml/:kind" element={<YamlEditorPage />} />
             <Route path="*" element={<Navigate to="/pods" replace />} />
           </Routes>
         </main>
