@@ -24,6 +24,20 @@
     --input: 220 20% 18%;
     --ring: 145 94% 67%;
     --radius: 0.125rem;
+
+    /* Stitch surface tokens */
+    --surface: 220 30% 9%;
+    --surface-container: 220 25% 14%;
+    --surface-container-high: 220 20% 18%;
+    --surface-container-low: 220 24% 12%;
+    --surface-container-lowest: 220 45% 6%;
+    --surface-bright: 220 17% 25%;
+    --surface-variant: 222 16% 22%;
+    --on-surface: 224 40% 91%;
+    --on-surface-variant: 140 10% 76%;
+    --outline: 120 5% 55%;
+    --outline-variant: 130 10% 26%;
+    --error: 5 100% 83%;
   }
 }
 
@@ -35,4 +49,41 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+}
+
+/* Stitch terminal / log viewer tokens */
+.terminal-text {
+  color: hsl(var(--on-surface));
+}
+.terminal-timestamp {
+  color: hsl(var(--outline));
+}
+.terminal-info {
+  color: hsl(var(--secondary));
+}
+.terminal-warn {
+  color: hsl(var(--destructive));
+}
+.terminal-error {
+  color: hsl(var(--error));
+}
+.terminal-highlight {
+  color: hsl(var(--primary));
+  font-weight: 700;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--surface));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--surface-variant));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary));
 }
