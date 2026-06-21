@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "../components/toast";
 
 export interface KubeContext {
   name: string;
@@ -20,7 +21,7 @@ export function useKubeContext() {
       const active = await invoke<string>("get_active_context");
       setActiveContext(active);
     } catch (e) {
-      console.error("Failed to fetch contexts:", e);
+      toast(String(e), "error");
     } finally {
       setLoading(false);
     }
@@ -34,8 +35,9 @@ export function useKubeContext() {
     try {
       await invoke("switch_context", { contextName: name });
       setActiveContext(name);
+      toast(`Switched to ${name}`, "success");
     } catch (e) {
-      console.error("Failed to switch context:", e);
+      toast(String(e), "error");
     }
   }, []);
 

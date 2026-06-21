@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { toast } from "../components/toast";
 
 const MAX_ROWS = 1500;
 
@@ -30,11 +31,15 @@ export function useLogStream(namespace: string, podName: string, container?: str
     });
     unlistenRef.current = unlisten;
 
-    await invoke("stream_pod_logs", {
-      namespace,
-      podName,
-      container: container || null,
-    });
+    try {
+      await invoke("stream_pod_logs", {
+        namespace,
+        podName,
+        container: container || null,
+      });
+    } catch (e) {
+      toast(String(e), "error");
+    }
   }, [namespace, podName, container, streaming]);
 
   const stopStream = useCallback(() => {
