@@ -3,6 +3,7 @@ import { Container } from "lucide-react";
 import { ContextSelector } from "./components/context-selector";
 import { NamespaceFilter } from "./components/namespace-filter";
 import { Sidebar } from "./components/sidebar";
+import { ToastContainer } from "./components/toast";
 import { ResourceListPage } from "./pages/resource-list-page";
 import { PodDetailPage } from "./pages/pod-detail-page";
 import { YamlEditorPage } from "./pages/yaml-editor-page";
@@ -10,6 +11,7 @@ import { YamlEditorPage } from "./pages/yaml-editor-page";
 function AppLayout() {
   return (
     <div className="dark min-h-screen bg-background text-foreground flex flex-col">
+      <ToastContainer />
       <header className="border-b border-border px-6 py-3 flex items-center gap-4 shrink-0">
         <Container className="h-5 w-5 text-primary" />
         <h1 className="text-lg font-semibold">KubeLight</h1>
