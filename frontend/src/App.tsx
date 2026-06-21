@@ -4,6 +4,7 @@ import { ContextSelector } from "./components/context-selector";
 import { NamespaceFilter } from "./components/namespace-filter";
 import { Sidebar } from "./components/sidebar";
 import { ResourceListPage } from "./pages/resource-list-page";
+import { PodDetailPage } from "./pages/pod-detail-page";
 
 function AppLayout() {
   return (
@@ -26,6 +27,7 @@ function AppLayout() {
         <main className="flex-1 overflow-auto">
           <Routes>
             <Route path="/:kind" element={<ResourceListPage />} />
+            <Route path="/pods/:namespace/:name" element={<PodDetailPage />} />
             <Route path="*" element={<Navigate to="/pods" replace />} />
           </Routes>
         </main>
