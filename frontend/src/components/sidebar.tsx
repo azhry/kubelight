@@ -8,22 +8,58 @@ import {
   Key,
   Activity,
   Code,
-  ChevronRight,
+  Terminal,
+  ScrollText,
+  Settings,
+  Plus,
+  Container,
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { resourceKinds } from "../lib/resource-kinds";
+import { Button } from "./ui/button";
 import { useNavigate, useLocation } from "react-router-dom";
 
-const iconMap: Record<string, React.ReactNode> = {
-  Box: <Box className="h-4 w-4" />,
-  Layers: <Layers className="h-4 w-4" />,
-  Network: <Network className="h-4 w-4" />,
-  Folder: <Folder className="h-4 w-4" />,
-  Server: <Server className="h-4 w-4" />,
-  FileText: <FileText className="h-4 w-4" />,
-  Key: <Key className="h-4 w-4" />,
-  Activity: <Activity className="h-4 w-4" />,
-};
+interface NavItem {
+  kind: string;
+  label: string;
+  icon: React.ReactNode;
+}
+
+const sections: { title: string; items: NavItem[] }[] = [
+  {
+    title: "Workloads",
+    items: [
+      { kind: "pods", label: "Pods", icon: <Box className="h-4 w-4" /> },
+      { kind: "deployments", label: "Deployments", icon: <Layers className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Network",
+    items: [
+      { kind: "services", label: "Services", icon: <Network className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Cluster",
+    items: [
+      { kind: "namespaces", label: "Namespaces", icon: <Folder className="h-4 w-4" /> },
+      { kind: "nodes", label: "Nodes", icon: <Server className="h-4 w-4" /> },
+      { kind: "events", label: "Events", icon: <Activity className="h-4 w-4" /> },
+    ],
+  },
+  {
+    title: "Config",
+    items: [
+      { kind: "configmaps", label: "ConfigMaps", icon: <FileText className="h-4 w-4" /> },
+      { kind: "secrets", label: "Secrets", icon: <Key className="h-4 w-4" /> },
+    ],
+  },
+];
+
+const bottomItems: { label: string; icon: React.ReactNode }[] = [
+  { label: "Terminal", icon: <Terminal className="h-4 w-4" /> },
+  { label: "Logs", icon: <ScrollText className="h-4 w-4" /> },
+  { label: "Settings", icon: <Settings className="h-4 w-4" /> },
+];
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -32,52 +68,82 @@ export function Sidebar() {
   const activeKind = isYamlPage ? undefined : location.pathname.slice(1);
 
   return (
-    <aside className="w-60 border-r border-border bg-card flex flex-col">
-      <div className="p-4 border-b border-border">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-          Resources
-        </h2>
+    <aside className="hidden md:flex flex-col h-full w-64 border-r border-outline-variant bg-surface flex-shrink-0 z-40">
+      <div className="p-4 border-b border-outline-variant flex items-center gap-3">
+        <div className="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center border border-outline-variant">
+          <Container className="h-4 w-4 text-primary" />
+        </div>
+        <div>
+          <h1 className="font-headline-md text-headline-md text-primary font-bold leading-tight">
+            KubeLight
+          </h1>
+          <p className="font-label-sm text-label-sm text-on-surface-variant">Cluster connected</p>
+        </div>
       </div>
-      <nav className="flex-1 overflow-y-auto p-2 space-y-1">
-        {resourceKinds.map((item) => {
-          const isActive = activeKind === item.kind;
-          return (
-            <button
-              key={item.kind}
-              onClick={() => navigate(`/${item.kind}`)}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                isActive
-                  ? "bg-accent text-accent-foreground font-medium"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              )}
-            >
-              {iconMap[item.icon]}
-              <span className="flex-1 text-left">{item.label}</span>
-              <ChevronRight
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform",
-                  isActive ? "opacity-100" : "opacity-0"
-                )}
-              />
-            </button>
-          );
-        })}
+
+      <div className="p-4">
+        <Button
+          disabled
+          className="w-full bg-primary text-primary-foreground font-label-sm text-label-sm py-2 px-4 rounded flex items-center justify-center gap-2 hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Plus className="h-4 w-4" /> New Resource
+        </Button>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto py-2">
+        {sections.map((section) => (
+          <div key={section.title}>
+            <div className="px-4 py-2 font-label-sm text-label-sm text-outline uppercase tracking-wider mb-1">
+              {section.title}
+            </div>
+            <ul className="flex flex-col gap-1 px-2">
+              {section.items.map((item) => {
+                const isActive = activeKind === item.kind;
+                return (
+                  <li key={item.kind}>
+                    <button
+                      onClick={() => navigate(`/${item.kind}`)}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-4 py-2 text-left font-label-sm text-label-sm transition-all duration-150 border-l-2",
+                        isActive
+                          ? "text-primary border-primary bg-surface-container-low font-bold"
+                          : "text-on-surface-variant border-transparent hover:text-on-surface hover:bg-surface-container-high"
+                      )}
+                    >
+                      {item.icon}
+                      <span>{item.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
 
-      <div className="border-t border-border p-2">
+      <div className="border-t border-outline-variant mt-auto p-2 space-y-1">
         <button
           onClick={() => navigate("/yaml/pods")}
           className={cn(
-            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+            "w-full flex items-center gap-3 px-4 py-2 rounded text-left font-label-sm text-label-sm transition-colors",
             isYamlPage
-              ? "bg-accent text-accent-foreground font-medium"
-              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              ? "text-primary bg-surface-container-low font-bold"
+              : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
           )}
         >
           <Code className="h-4 w-4" />
-          <span className="flex-1 text-left">YAML Editor</span>
+          <span>YAML Editor</span>
         </button>
+        {bottomItems.map((item) => (
+          <button
+            key={item.label}
+            disabled
+            className="w-full flex items-center gap-3 px-4 py-2 rounded text-left font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50"
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
       </div>
     </aside>
   );
