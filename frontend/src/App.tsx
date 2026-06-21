@@ -1,15 +1,21 @@
-import { Button } from "./components/ui/button";
-import { Terminal, GitBranch, Container } from "lucide-react";
+import { Container } from "lucide-react";
+import { ContextSelector } from "./components/context-selector";
+import { NamespaceFilter } from "./components/namespace-filter";
 
 function App() {
   return (
     <div className="dark min-h-screen bg-background text-foreground">
-      <header className="border-b border-border px-6 py-4 flex items-center gap-3">
+      <header className="border-b border-border px-6 py-4 flex items-center gap-4">
         <Container className="h-6 w-6 text-primary" />
         <h1 className="text-xl font-semibold">KubeLight</h1>
-        <span className="text-xs text-muted-foreground ml-auto">
-          Kubernetes GUI — Rust + Tauri
-        </span>
+        <div className="ml-auto flex items-center gap-4 min-w-0">
+          <div className="w-56">
+            <ContextSelector />
+          </div>
+          <div className="w-48">
+            <NamespaceFilter />
+          </div>
+        </div>
       </header>
 
       <main className="max-w-2xl mx-auto mt-24 px-6 text-center">
@@ -22,17 +28,6 @@ function App() {
           <br />
           Built with React + Tailwind + Tauri v2.
         </p>
-
-        <div className="flex justify-center gap-4 mb-12">
-          <Button variant="default">
-            <Terminal className="mr-2 h-4 w-4" />
-            Get Started
-          </Button>
-          <Button variant="outline">
-            <GitBranch className="mr-2 h-4 w-4" />
-            GitHub
-          </Button>
-        </div>
 
         <div className="grid grid-cols-3 gap-4 text-left">
           {[
