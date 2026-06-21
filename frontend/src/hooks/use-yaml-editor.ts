@@ -58,6 +58,7 @@ export function useYamlEditor(kind: string, namespace: string | undefined) {
     resources,
     yamlStr,
     setYamlStr,
+    originalYaml,
     loading,
     saving,
     error,
