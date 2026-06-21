@@ -73,24 +73,17 @@ async fn reload_kubeconfig(
     }
 }
 
-#[tauri::command]
-async fn get_contexts(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Vec<ContextInfo>, String> {
-    let app = state.read().await;
+async fn get_contexts_impl(app: &AppState) -> Result<Vec<ContextInfo>, String> {
     match &app.ctx_mgr {
         Some(mgr) => Ok(mgr.list_contexts().await),
         None => Err("Kubeconfig not configured".to_string()),
     }
 }
 
-#[tauri::command]
-async fn switch_context(
-    state: State<'_, Arc<RwLock<AppState>>>,
-    context_name: String,
-) -> Result<(), String> {
-    let app = state.read().await;
+async fn switch_context_impl(app: &AppState, context_name: &str) -> Result<(), String> {
     match &app.ctx_mgr {
         Some(mgr) => {
-            mgr.switch_context(&context_name).await?;
+            mgr.switch_context(context_name).await?;
             let kubeconfig = mgr.kubeconfig().await;
             app.client_pool
                 .refresh_with_config(&kubeconfig)
@@ -102,15 +95,34 @@ async fn switch_context(
     }
 }
 
+async fn get_active_context_impl(app: &AppState) -> Result<String, String> {
+    match &app.ctx_mgr {
+        Some(mgr) => Ok(mgr.active_context_name().await),
+        None => Err("Kubeconfig not configured".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn get_contexts(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Vec<ContextInfo>, String> {
+    let app = state.read().await;
+    get_contexts_impl(&app).await
+}
+
+#[tauri::command]
+async fn switch_context(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    context_name: String,
+) -> Result<(), String> {
+    let app = state.read().await;
+    switch_context_impl(&app, &context_name).await
+}
+
 #[tauri::command]
 async fn get_active_context(
     state: State<'_, Arc<RwLock<AppState>>>,
 ) -> Result<String, String> {
     let app = state.read().await;
-    match &app.ctx_mgr {
-        Some(mgr) => Ok(mgr.active_context_name().await),
-        None => Err("Kubeconfig not configured".to_string()),
-    }
+    get_active_context_impl(&app).await
 }
 
 #[tauri::command]
@@ -256,4 +268,129 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn sample_kubeconfig() -> &'static str {
+        r#"
+apiVersion: v1
+kind: Config
+clusters:
+  - cluster:
+      server: https://cluster-a.example.com
+    name: cluster-a
+  - cluster:
+      server: https://cluster-b.example.com
+    name: cluster-b
+contexts:
+  - context:
+      cluster: cluster-a
+      user: user-a
+      namespace: ns-a
+    name: ctx-a
+  - context:
+      cluster: cluster-b
+      user: user-b
+      namespace: ns-b
+    name: ctx-b
+current-context: ctx-a
+users:
+  - name: user-a
+    user:
+      token: token-a
+  - name: user-b
+    user:
+      token: token-b
+"#
+    }
+
+    fn write_temp_config(contents: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        path.push(format!("kubeconfig-be012-{}-{}.yaml", std::process::id(), n));
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+        path
+    }
+
+    fn app_state_with_config(path: &str) -> AppState {
+        let ctx_mgr = ContextManager::load(Some(path)).unwrap();
+        AppState {
+            ctx_mgr: Some(ctx_mgr),
+            client_pool: ClientPool::new(),
+            config_error: None,
+        }
+    }
+
+    fn unconfigured_app_state() -> AppState {
+        AppState {
+            ctx_mgr: None,
+            client_pool: ClientPool::new(),
+            config_error: Some("no kubeconfig".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_contexts_returns_contexts() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap());
+        let contexts = get_contexts_impl(&app).await.unwrap();
+        assert_eq!(contexts.len(), 2);
+        assert_eq!(contexts[0].name, "ctx-a");
+        assert!(contexts[0].is_active);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_get_contexts_unconfigured() {
+        let app = unconfigured_app_state();
+        let result = get_contexts_impl(&app).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Kubeconfig not configured"));
+    }
+
+    #[tokio::test]
+    async fn test_get_active_context() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap());
+        let active = get_active_context_impl(&app).await.unwrap();
+        assert_eq!(active, "ctx-a");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_switch_context_updates_active() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap());
+        switch_context_impl(&app, "ctx-b").await.unwrap();
+        let active = get_active_context_impl(&app).await.unwrap();
+        assert_eq!(active, "ctx-b");
+        let contexts = get_contexts_impl(&app).await.unwrap();
+        assert!(contexts.iter().find(|c| c.name == "ctx-b").unwrap().is_active);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_switch_context_not_found() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap());
+        let result = switch_context_impl(&app, "missing").await;
+        assert!(result.is_err());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_switch_context_unconfigured() {
+        let app = unconfigured_app_state();
+        let result = switch_context_impl(&app, "ctx-a").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Kubeconfig not configured"));
+    }
 }
