@@ -11,18 +11,66 @@ use client::ClientPool;
 use context::{ContextInfo, ContextManager};
 use resources::ResourceItem;
 use std::sync::Arc;
+use serde::Serialize;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
 
 struct AppState {
-    ctx_mgr: ContextManager,
+    ctx_mgr: Option<ContextManager>,
     client_pool: ClientPool,
+    config_error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct KubeconfigStatus {
+    configured: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn get_kubeconfig_status(state: State<'_, Arc<RwLock<AppState>>>) -> Result<KubeconfigStatus, String> {
+    let app = state.read().await;
+    Ok(KubeconfigStatus {
+        configured: app.ctx_mgr.is_some(),
+        error: app.config_error.clone(),
+    })
+}
+
+#[tauri::command]
+async fn reload_kubeconfig(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    path: Option<String>,
+) -> Result<KubeconfigStatus, String> {
+    let mut app = state.write().await;
+    match ContextManager::load(path.as_deref()) {
+        Ok(ctx_mgr) => {
+            app.ctx_mgr = Some(ctx_mgr);
+            app.config_error = None;
+            let _ = app.client_pool.refresh().await;
+            Ok(KubeconfigStatus {
+                configured: true,
+                error: None,
+            })
+        }
+        Err(e) => {
+            app.ctx_mgr = None;
+            let err = e.to_string();
+            app.config_error = Some(err.clone());
+            Ok(KubeconfigStatus {
+                configured: false,
+                error: Some(err),
+            })
+        }
+    }
 }
 
 #[tauri::command]
 async fn get_contexts(state: State<'_, Arc<RwLock<AppState>>>) -> Result<Vec<ContextInfo>, String> {
     let app = state.read().await;
-    Ok(app.ctx_mgr.list_contexts().await)
+    match &app.ctx_mgr {
+        Some(mgr) => Ok(mgr.list_contexts().await),
+        None => Err("Kubeconfig not configured".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -31,9 +79,14 @@ async fn switch_context(
     context_name: String,
 ) -> Result<(), String> {
     let app = state.read().await;
-    app.ctx_mgr.switch_context(&context_name).await?;
-    app.client_pool.refresh().await.map_err(|e| e.to_string())?;
-    Ok(())
+    match &app.ctx_mgr {
+        Some(mgr) => {
+            mgr.switch_context(&context_name).await?;
+            app.client_pool.refresh().await.map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        None => Err("Kubeconfig not configured".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -41,7 +94,10 @@ async fn get_active_context(
     state: State<'_, Arc<RwLock<AppState>>>,
 ) -> Result<String, String> {
     let app = state.read().await;
-    Ok(app.ctx_mgr.active_context_name().await)
+    match &app.ctx_mgr {
+        Some(mgr) => Ok(mgr.active_context_name().await),
+        None => Err("Kubeconfig not configured".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -158,16 +214,23 @@ fn main() {
         )
         .init();
 
-    let ctx_mgr = ContextManager::new().expect("Failed to load kubeconfig");
+    let (ctx_mgr, config_error) = match ContextManager::new() {
+        Ok(mgr) => (Some(mgr), None),
+        Err(e) => (None, Some(e.to_string())),
+    };
     let client_pool = ClientPool::new();
     let app_state = Arc::new(RwLock::new(AppState {
         ctx_mgr,
         client_pool,
+        config_error,
     }));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
+            get_kubeconfig_status,
+            reload_kubeconfig,
             get_contexts,
             switch_context,
             get_active_context,
