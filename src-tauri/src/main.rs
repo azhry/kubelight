@@ -10,6 +10,7 @@ mod resources;
 use client::ClientPool;
 use context::{ContextInfo, ContextManager};
 use kube::Client;
+use operations::ExecOutput;
 use resources::ResourceItem;
 use std::sync::Arc;
 use serde::Serialize;
@@ -297,6 +298,76 @@ async fn get_resource_yaml(
     get_resource_yaml_impl(&client, &kind, namespace, &name).await
 }
 
+async fn exec_pod_impl(
+    client: &Client,
+    namespace: &str,
+    pod_name: &str,
+    container: Option<&str>,
+    command: Vec<String>,
+    emit: impl Fn(ExecOutput) + Send + 'static,
+) -> Result<(), String> {
+    operations::exec_pod(client, namespace, pod_name, container, command, emit).await
+}
+
+async fn port_forward_impl(
+    client: &Client,
+    namespace: &str,
+    pod_name: &str,
+    local_port: u16,
+    pod_port: u16,
+) -> Result<(), String> {
+    operations::port_forward(client, namespace, pod_name, local_port, pod_port).await
+}
+
+#[tauri::command]
+async fn exec_pod(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+    namespace: String,
+    pod_name: String,
+    container: Option<String>,
+    command: Vec<String>,
+) -> Result<(), String> {
+    let client = {
+        let app = state.read().await;
+        app.client_pool
+            .get_or_init()
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    exec_pod_impl(
+        &client,
+        &namespace,
+        &pod_name,
+        container.as_deref(),
+        command,
+        move |line| {
+            let _ = app_handle.emit("exec-output", &line);
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn port_forward(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    namespace: String,
+    pod_name: String,
+    local_port: u16,
+    pod_port: u16,
+) -> Result<(), String> {
+    let client = {
+        let app = state.read().await;
+        app.client_pool
+            .get_or_init()
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    port_forward_impl(&client, &namespace, &pod_name, local_port, pod_port).await
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -331,6 +402,8 @@ fn main() {
             patch_resource,
             scale_deployment,
             get_resource_yaml,
+            exec_pod,
+            port_forward,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -558,6 +631,39 @@ users:
         let app = unconfigured_app_state();
         let result = app.client_pool.get_or_init().await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_exec_pod_impl_with_mock_client() {
+        if let Some(client) = mock_unreachable_client() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<ExecOutput>(8);
+            let result = exec_pod_impl(
+                &client,
+                "default",
+                "nginx",
+                Some("nginx"),
+                vec!["/bin/sh".into(), "-c".into(), "echo hi".into()],
+                move |out| {
+                    let _ = tx.try_send(out);
+                },
+            )
+            .await;
+            assert!(result.is_err());
+            // Give any spawned task a moment to fail gracefully.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = rx.try_recv();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_port_forward_impl_with_mock_client() {
+        if let Some(client) = mock_unreachable_client() {
+            // Pick an ephemeral port so the test is unlikely to conflict.
+            let result = port_forward_impl(&client, "default", "nginx", 0, 80).await;
+            // Binding port 0 lets the OS choose a port, so local bind should succeed,
+            // but the background port-forward request to the unreachable cluster will fail.
+            assert!(result.is_ok());
+        }
     }
 
     fn app_state_arc(app: AppState) -> Arc<RwLock<AppState>> {

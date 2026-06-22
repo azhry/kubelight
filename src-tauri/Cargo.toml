@@ -12,7 +12,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-kube = { version = "0.98", default-features = false, features = ["client", "rustls-tls", "config"] }
+kube = { version = "0.98", default-features = false, features = ["client", "rustls-tls", "config", "ws"] }
 k8s-openapi = { version = "0.24", features = ["latest"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
