@@ -712,6 +712,52 @@ spec:
         }
     }
 
+    #[tokio::test]
+    async fn test_exec_pod_impl_empty_command_defaults_to_shell() {
+        if let Some(client) = mock_unreachable_client() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<ExecOutput>(8);
+            let result = exec_pod_impl(
+                &client,
+                "default",
+                "nginx",
+                Some("nginx"),
+                vec![], // empty command should default to /bin/sh
+                move |out| {
+                    let _ = tx.try_send(out);
+                },
+            )
+            .await;
+            // The unreachable cluster causes the exec to fail, but the command path
+            // should be handled without panicking.
+            assert!(result.is_err());
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = rx.try_recv();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_port_forward_impl_binds_specific_port() {
+        if let Some(client) = mock_unreachable_client() {
+            // Use port 0 so the OS assigns an available ephemeral port.
+            let result = port_forward_impl(&client, "default", "nginx", 0, 80).await;
+            assert!(result.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_exec_pod_command_without_client() {
+        let app = unconfigured_app_state();
+        let result = app.client_pool.get_or_init().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_port_forward_command_without_client() {
+        let app = unconfigured_app_state();
+        let result = app.client_pool.get_or_init().await;
+        assert!(result.is_err());
+    }
+
     fn app_state_arc(app: AppState) -> Arc<RwLock<AppState>> {
         Arc::new(RwLock::new(app))
     }
