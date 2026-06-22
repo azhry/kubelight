@@ -249,6 +249,16 @@ async fn get_resource_yaml_impl(
     operations::get_resource_yaml(client, kind, namespace.as_deref(), name).await
 }
 
+async fn apply_resource_impl(
+    client: &Client,
+    kind: &str,
+    namespace: Option<String>,
+    name: &str,
+    yaml: &str,
+) -> Result<serde_json::Value, String> {
+    operations::apply_resource(client, kind, namespace.as_deref(), name, yaml).await
+}
+
 #[tauri::command]
 async fn patch_resource(
     state: State<'_, Arc<RwLock<AppState>>>,
@@ -296,6 +306,23 @@ async fn get_resource_yaml(
         .await
         .map_err(|e| e.to_string())?;
     get_resource_yaml_impl(&client, &kind, namespace, &name).await
+}
+
+#[tauri::command]
+async fn apply_resource(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    kind: String,
+    namespace: Option<String>,
+    name: String,
+    yaml: String,
+) -> Result<serde_json::Value, String> {
+    let app = state.read().await;
+    let client = app
+        .client_pool
+        .get_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    apply_resource_impl(&client, &kind, namespace, &name, &yaml).await
 }
 
 async fn exec_pod_impl(
@@ -402,6 +429,7 @@ fn main() {
             patch_resource,
             scale_deployment,
             get_resource_yaml,
+            apply_resource,
             exec_pod,
             port_forward,
         ])
@@ -622,6 +650,24 @@ users:
     async fn test_get_resource_yaml_impl_with_mock_client() {
         if let Some(client) = mock_unreachable_client() {
             let result = get_resource_yaml_impl(&client, "pods", Some("default".to_string()), "nginx").await;
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_resource_impl_with_mock_client() {
+        if let Some(client) = mock_unreachable_client() {
+            let yaml = r#"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+"#;
+            let result = apply_resource_impl(&client, "pods", Some("default".to_string()), "nginx", yaml).await;
             assert!(result.is_err());
         }
     }
