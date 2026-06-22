@@ -7,6 +7,7 @@ import {
   FileText,
   Key,
   Activity,
+  Globe,
   Code,
   Terminal,
   ScrollText,
@@ -36,6 +37,8 @@ const sections: { title: string; items: NavItem[] }[] = [
     title: "Network",
     items: [
       { kind: "services", label: "Services", icon: <Network className="h-4 w-4" /> },
+      { kind: "ingresses", label: "Ingresses", icon: <Globe className="h-4 w-4" /> },
+      { kind: "ingressclasses", label: "IngressClasses", icon: <Globe className="h-4 w-4" /> },
     ],
   },
   {

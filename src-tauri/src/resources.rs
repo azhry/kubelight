@@ -2,6 +2,8 @@ use kube::api::{Api, ListParams};
 use kube::Client;
 use serde::Serialize;
 
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
+
 #[derive(Debug, Serialize)]
 pub struct ResourceItem {
     pub kind: String,
@@ -26,6 +28,8 @@ pub async fn list_resources(
         "configmaps" => list_configmaps(client, namespace).await,
         "secrets" => list_secrets(client, namespace).await,
         "events" => list_events(client, namespace).await,
+        "ingresses" => list_ingresses(client, namespace).await,
+        "ingressclasses" => list_ingress_classes(client).await,
         _ => Err(format!("Unknown resource kind: {}", kind)),
     }
 }
@@ -270,6 +274,71 @@ async fn list_events(client: &Client, namespace: Option<&str>) -> Result<Vec<Res
     Ok(events.items.into_iter().map(event_to_item).collect())
 }
 
+fn ingress_to_item(i: Ingress) -> ResourceItem {
+    let class = i
+        .spec
+        .as_ref()
+        .and_then(|s| s.ingress_class_name.clone())
+        .unwrap_or_else(|| "default".into());
+    let hosts = i
+        .spec
+        .as_ref()
+        .and_then(|s| s.rules.as_ref().map(|r| r.len()))
+        .unwrap_or(0);
+    ResourceItem {
+        kind: "Ingress".into(),
+        name: i.metadata.name.clone().unwrap_or_default(),
+        namespace: i.metadata.namespace.clone().unwrap_or_default(),
+        api_version: "networking.k8s.io/v1".into(),
+        age: format_duration(
+            i.metadata
+                .creation_timestamp
+                .map(|t| t.0)
+                .unwrap_or_default(),
+        ),
+        status: format!("{} ({} host{})", class, hosts, if hosts == 1 { "" } else { "s" }),
+    }
+}
+
+async fn list_ingresses(
+    client: &Client,
+    namespace: Option<&str>,
+) -> Result<Vec<ResourceItem>, String> {
+    let api = match namespace {
+        Some(ns) => Api::<Ingress>::namespaced(client.clone(), ns),
+        None => Api::<Ingress>::all(client.clone()),
+    };
+    let ingresses = api.list(&ListParams::default()).await.map_err(|e| e.to_string())?;
+    Ok(ingresses.items.into_iter().map(ingress_to_item).collect())
+}
+
+fn ingress_class_to_item(ic: IngressClass) -> ResourceItem {
+    let controller = ic
+        .spec
+        .as_ref()
+        .and_then(|s| s.controller.clone())
+        .unwrap_or_else(|| "Unknown".into());
+    ResourceItem {
+        kind: "IngressClass".into(),
+        name: ic.metadata.name.clone().unwrap_or_default(),
+        namespace: "".into(),
+        api_version: "networking.k8s.io/v1".into(),
+        age: format_duration(
+            ic.metadata
+                .creation_timestamp
+                .map(|t| t.0)
+                .unwrap_or_default(),
+        ),
+        status: controller,
+    }
+}
+
+async fn list_ingress_classes(client: &Client) -> Result<Vec<ResourceItem>, String> {
+    let api = Api::<IngressClass>::all(client.clone());
+    let classes = api.list(&ListParams::default()).await.map_err(|e| e.to_string())?;
+    Ok(classes.items.into_iter().map(ingress_class_to_item).collect())
+}
+
 pub async fn get_pod_names(client: &Client, namespace: &str) -> Result<Vec<String>, String> {
     let api = Api::<k8s_openapi::api::core::v1::Pod>::namespaced(client.clone(), namespace);
     let pods = api.list(&ListParams::default()).await.map_err(|e| e.to_string())?;
@@ -300,6 +369,7 @@ mod tests {
     use super::*;
     use k8s_openapi::api::core::v1::{ConfigMap, Event, Namespace, Node, Pod, Secret, Service};
     use k8s_openapi::api::apps::v1::Deployment;
+    use k8s_openapi::api::networking::v1::{Ingress, IngressClass, IngressClassSpec, IngressSpec};
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
     fn meta(name: &str, namespace: Option<&str>) -> ObjectMeta {
@@ -326,7 +396,7 @@ mod tests {
 
     fn list_resources_kind_dispatch(kind: &str) -> Result<(), String> {
         match kind {
-            "pods" | "deployments" | "services" | "namespaces" | "nodes" | "configmaps" | "secrets" | "events" => Ok(()),
+            "pods" | "deployments" | "services" | "namespaces" | "nodes" | "configmaps" | "secrets" | "events" | "ingresses" | "ingressclasses" => Ok(()),
             _ => Err(format!("Unknown resource kind: {}", kind)),
         }
     }
@@ -483,5 +553,42 @@ mod tests {
         assert_eq!(json["kind"], "Pod");
         assert_eq!(json["name"], "test");
         assert_eq!(json["namespace"], "default");
+    }
+
+    #[test]
+    fn test_ingress_to_item() {
+        let ingress = Ingress {
+            metadata: meta("web-ingress", Some("default")),
+            spec: Some(IngressSpec {
+                ingress_class_name: Some("nginx".to_string()),
+                rules: Some(vec![Default::default(), Default::default()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let item = ingress_to_item(ingress);
+        assert_eq!(item.kind, "Ingress");
+        assert_eq!(item.name, "web-ingress");
+        assert_eq!(item.namespace, "default");
+        assert_eq!(item.api_version, "networking.k8s.io/v1");
+        assert!(item.status.contains("nginx"));
+        assert!(item.status.contains("2 hosts"));
+    }
+
+    #[test]
+    fn test_ingress_class_to_item() {
+        let ic = IngressClass {
+            metadata: meta("nginx", None),
+            spec: Some(IngressClassSpec {
+                controller: Some("k8s.io/ingress-nginx".to_string()),
+                parameters: None,
+            }),
+            ..Default::default()
+        };
+        let item = ingress_class_to_item(ic);
+        assert_eq!(item.kind, "IngressClass");
+        assert_eq!(item.name, "nginx");
+        assert_eq!(item.namespace, "");
+        assert_eq!(item.status, "k8s.io/ingress-nginx");
     }
 }
