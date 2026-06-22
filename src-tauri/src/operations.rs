@@ -1,5 +1,6 @@
 use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{ConfigMap, Pod, Secret, Service};
+use k8s_openapi::api::networking::v1::Ingress;
 use kube::api::{Api, AttachParams, Patch, PatchParams, PostParams};
 use kube::Client;
 use serde::Serialize;
@@ -9,6 +10,10 @@ use tokio::io::AsyncBufReadExt;
 enum ResourceApi {
     Pods(Api<Pod>),
     Deployments(Api<Deployment>),
+    Services(Api<Service>),
+    ConfigMaps(Api<ConfigMap>),
+    Secrets(Api<Secret>),
+    Ingresses(Api<Ingress>),
 }
 
 fn resource_api(client: &Client, kind: &str, namespace: Option<&str>) -> Result<ResourceApi, String> {
@@ -27,6 +32,34 @@ fn resource_api(client: &Client, kind: &str, namespace: Option<&str>) -> Result<
             };
             Ok(ResourceApi::Deployments(api))
         }
+        "services" | "service" => {
+            let api = match namespace {
+                Some(ns) => Api::namespaced(client.clone(), ns),
+                None => Api::all(client.clone()),
+            };
+            Ok(ResourceApi::Services(api))
+        }
+        "configmaps" | "configmap" => {
+            let api = match namespace {
+                Some(ns) => Api::namespaced(client.clone(), ns),
+                None => Api::all(client.clone()),
+            };
+            Ok(ResourceApi::ConfigMaps(api))
+        }
+        "secrets" | "secret" => {
+            let api = match namespace {
+                Some(ns) => Api::namespaced(client.clone(), ns),
+                None => Api::all(client.clone()),
+            };
+            Ok(ResourceApi::Secrets(api))
+        }
+        "ingresses" | "ingress" => {
+            let api = match namespace {
+                Some(ns) => Api::namespaced(client.clone(), ns),
+                None => Api::all(client.clone()),
+            };
+            Ok(ResourceApi::Ingresses(api))
+        }
         _ => Err(format!("Unsupported resource kind: {}", kind)),
     }
 }
@@ -35,6 +68,10 @@ async fn get_resource_value(api: &ResourceApi, name: &str) -> Result<Value, kube
     match api {
         ResourceApi::Pods(a) => a.get(name).await.map(serialize_resource),
         ResourceApi::Deployments(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Services(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::ConfigMaps(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Secrets(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Ingresses(a) => a.get(name).await.map(serialize_resource),
     }
 }
 
@@ -47,6 +84,10 @@ async fn patch_resource_value(
     match api {
         ResourceApi::Pods(a) => a.patch(name, params, patch).await.map(serialize_resource),
         ResourceApi::Deployments(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Services(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::ConfigMaps(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Secrets(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Ingresses(a) => a.patch(name, params, patch).await.map(serialize_resource),
     }
 }
 
@@ -76,6 +117,59 @@ pub async fn patch_resource(
     patch_resource_value(&api, name, &params, &patch)
         .await
         .map_err(|e| format!("Patch failed: {}", e))
+}
+
+async fn replace_resource_value(
+    api: &ResourceApi,
+    name: &str,
+    params: &PostParams,
+    value: Value,
+) -> Result<Value, String> {
+    match api {
+        ResourceApi::Pods(a) => {
+            let data: Pod = serde_json::from_value(value).map_err(|e| format!("Invalid Pod YAML: {}", e))?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Deployments(a) => {
+            let data: Deployment = serde_json::from_value(value).map_err(|e| format!("Invalid Deployment YAML: {}", e))?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Services(a) => {
+            let data: Service = serde_json::from_value(value).map_err(|e| format!("Invalid Service YAML: {}", e))?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::ConfigMaps(a) => {
+            let data: ConfigMap = serde_json::from_value(value).map_err(|e| format!("Invalid ConfigMap YAML: {}", e))?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Secrets(a) => {
+            let data: Secret = serde_json::from_value(value).map_err(|e| format!("Invalid Secret YAML: {}", e))?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Ingresses(a) => {
+            let data: Ingress = serde_json::from_value(value).map_err(|e| format!("Invalid Ingress YAML: {}", e))?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+    }
+}
+
+pub async fn apply_resource(
+    client: &Client,
+    kind: &str,
+    namespace: Option<&str>,
+    name: &str,
+    yaml_str: &str,
+) -> Result<Value, String> {
+    let mut value: Value = serde_yaml::from_str(yaml_str).map_err(|e| format!("YAML parse failed: {}", e))?;
+
+    let ns = namespace.ok_or_else(|| "Namespace is required for this resource kind".to_string())?;
+    value["metadata"]["name"] = name.into();
+    value["metadata"]["namespace"] = ns.into();
+
+    let api = resource_api(client, kind, Some(ns))?;
+    let params = PostParams::default();
+    replace_resource_value(&api, name, &params, value).await
+        .map_err(|e| format!("Apply failed: {}", e))
 }
 
 pub async fn scale_deployment(
@@ -321,14 +415,33 @@ mod tests {
         // by testing a lightweight dispatcher used by the function.
         assert!(matches!(kind_to_api_group("pods"), Some(_)));
         assert!(matches!(kind_to_api_group("deployments"), Some(_)));
-        assert!(kind_to_api_group("services").is_none());
+        assert!(matches!(kind_to_api_group("services"), Some(_)));
+        assert!(matches!(kind_to_api_group("configmaps"), Some(_)));
+        assert!(matches!(kind_to_api_group("secrets"), Some(_)));
+        assert!(matches!(kind_to_api_group("ingresses"), Some(_)));
+        assert!(kind_to_api_group("unicorns").is_none());
     }
 
     fn kind_to_api_group(kind: &str) -> Option<&'static str> {
         match kind.to_lowercase().as_str() {
             "pods" | "pod" => Some(""),
             "deployments" | "deployment" => Some("apps"),
+            "services" | "service" => Some(""),
+            "configmaps" | "configmap" => Some(""),
+            "secrets" | "secret" => Some(""),
+            "ingresses" | "ingress" => Some("networking.k8s.io"),
             _ => None,
         }
+    }
+
+    #[tokio::test]
+    async fn test_apply_resource_invalid_yaml() {
+        let result = apply_resource(&Client::try_default().await.unwrap_or_else(|_| {
+            // A default client may fail without a cluster, but we only need to test parsing.
+            let config = kube::config::Config::new("http://127.0.0.1:1".parse().unwrap());
+            Client::try_from(config).unwrap()
+        }), "pods", Some("default"), "nginx", "not: : valid yaml").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("YAML parse failed"));
     }
 }
