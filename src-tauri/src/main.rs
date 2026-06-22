@@ -673,6 +673,44 @@ spec:
     }
 
     #[tokio::test]
+    async fn test_apply_resource_impl_unsupported_kind() {
+        if let Some(client) = mock_unreachable_client() {
+            let yaml = r#"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+"#;
+            let result = apply_resource_impl(&client, "unicorns", Some("default".to_string()), "nginx", yaml).await;
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Unsupported resource kind"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_resource_impl_missing_namespace() {
+        if let Some(client) = mock_unreachable_client() {
+            let yaml = r#"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+"#;
+            let result = apply_resource_impl(&client, "pods", None, "nginx", yaml).await;
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Namespace is required"));
+        }
+    }
+
+    #[tokio::test]
     async fn test_operations_command_without_client() {
         let app = unconfigured_app_state();
         let result = app.client_pool.get_or_init().await;
