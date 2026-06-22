@@ -21,6 +21,20 @@ const columns: Column[] = [
 
 type SortDir = "asc" | "desc" | null;
 
+function parseAgeSeconds(age?: string): number {
+  if (!age || age === "-") return Number.MAX_SAFE_INTEGER;
+  const match = age.trim().toLowerCase().match(/^(?:(\d+)y)?\s*(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  const [, years, days, hours, minutes, seconds] = match.map((v) => Number(v) || 0);
+  return (
+    years * 365 * 24 * 60 * 60 +
+    days * 24 * 60 * 60 +
+    hours * 60 * 60 +
+    minutes * 60 +
+    seconds
+  );
+}
+
 export function ResourceTable({
   resources,
   loading,
@@ -48,9 +62,14 @@ export function ResourceTable({
 
   const sorted = [...resources].sort((a, b) => {
     if (!sortKey || !sortDir) return 0;
-    const aVal = String((a as any)[sortKey] || "");
-    const bVal = String((b as any)[sortKey] || "");
-    const cmp = aVal.localeCompare(bVal);
+    let cmp = 0;
+    if (sortKey === "age") {
+      cmp = parseAgeSeconds(a.age) - parseAgeSeconds(b.age);
+    } else {
+      const aVal = String((a as any)[sortKey] || "");
+      const bVal = String((b as any)[sortKey] || "");
+      cmp = aVal.localeCompare(bVal);
+    }
     return sortDir === "asc" ? cmp : -cmp;
   });
 
