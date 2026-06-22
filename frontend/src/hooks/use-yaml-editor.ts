@@ -1,23 +1,21 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import * as yaml from "js-yaml";
-import { useResources } from "./use-resources";
 
-export function useYamlEditor(kind: string, namespace: string | undefined) {
+export function useYamlEditor(kind: string, namespace: string | undefined, name: string | undefined) {
   const [yamlStr, setYamlStr] = useState<string>("");
   const [originalYaml, setOriginalYaml] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { resources } = useResources(kind, namespace);
 
-  const fetchYaml = useCallback(async (name: string) => {
+  const fetchYaml = useCallback(async () => {
+    if (!name) return;
     setLoading(true);
     setError(null);
     try {
       const result = await invoke<string>("get_resource_yaml", {
         kind,
-        namespace: namespace || null,
+        namespace: namespace === "-" ? null : namespace || null,
         name,
       });
       setYamlStr(result);
@@ -27,25 +25,30 @@ export function useYamlEditor(kind: string, namespace: string | undefined) {
     } finally {
       setLoading(false);
     }
-  }, [kind, namespace]);
+  }, [kind, namespace, name]);
 
-  const applyPatch = useCallback(async (name: string) => {
+  useEffect(() => {
+    fetchYaml();
+  }, [fetchYaml]);
+
+  const apply = useCallback(async () => {
+    if (!name) return;
     setSaving(true);
     setError(null);
     try {
-      const parsed = yaml.load(yamlStr);
-      await invoke("patch_resource", {
+      await invoke("apply_resource", {
         kind,
-        namespace: namespace || null,
+        namespace: namespace === "-" ? null : namespace || null,
         name,
-        patchBody: parsed,
+        yaml: yamlStr,
       });
+      setOriginalYaml(yamlStr);
     } catch (e) {
       setError(String(e));
     } finally {
       setSaving(false);
     }
-  }, [kind, namespace, yamlStr]);
+  }, [kind, namespace, name, yamlStr]);
 
   const resetYaml = useCallback(() => {
     setYamlStr(originalYaml);
@@ -55,7 +58,6 @@ export function useYamlEditor(kind: string, namespace: string | undefined) {
   const hasChanges = yamlStr !== originalYaml;
 
   return {
-    resources,
     yamlStr,
     setYamlStr,
     originalYaml,
@@ -64,7 +66,7 @@ export function useYamlEditor(kind: string, namespace: string | undefined) {
     error,
     hasChanges,
     fetchYaml,
-    applyPatch,
+    apply,
     resetYaml,
   };
 }

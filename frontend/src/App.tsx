@@ -31,7 +31,7 @@ export function AppLayout() {
           <Routes>
             <Route path="/:kind" element={<ResourceListPage />} />
             <Route path="/pods/:namespace/:name" element={<PodDetailPage />} />
-            <Route path="/yaml/:kind" element={<YamlEditorPage />} />
+            <Route path="/edit/:kind/:namespace/:name" element={<YamlEditorPage />} />
             <Route path="*" element={<Navigate to="/pods" replace />} />
           </Routes>
         </main>

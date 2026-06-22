@@ -8,7 +8,6 @@ import {
   Key,
   Activity,
   Globe,
-  Code,
   Terminal,
   ScrollText,
   Settings,
@@ -67,8 +66,7 @@ const bottomItems: { label: string; icon: React.ReactNode }[] = [
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const isYamlPage = location.pathname.startsWith("/yaml");
-  const activeKind = isYamlPage ? undefined : location.pathname.slice(1);
+  const activeKind = location.pathname.split("/")[1];
 
   return (
     <aside className="hidden md:flex flex-col h-full w-64 border-r border-outline-variant bg-surface flex-shrink-0 z-40">
@@ -125,18 +123,6 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-outline-variant mt-auto p-2 space-y-1">
-        <button
-          onClick={() => navigate("/yaml/pods")}
-          className={cn(
-            "w-full flex items-center gap-3 px-4 py-2 rounded text-left font-label-sm text-label-sm transition-colors",
-            isYamlPage
-              ? "text-primary bg-surface-container-low font-bold"
-              : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
-          )}
-        >
-          <Code className="h-4 w-4" />
-          <span>YAML Editor</span>
-        </button>
         {bottomItems.map((item) => (
           <button
             key={item.label}
