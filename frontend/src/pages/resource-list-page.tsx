@@ -13,7 +13,7 @@ export function ResourceListPage() {
   const title = kindInfo?.label || kind.charAt(0).toUpperCase() + kind.slice(1);
 
   return (
-    <div className="flex-1 flex flex-col bg-surface-dim">
+    <div className="h-full overflow-hidden flex flex-col bg-surface-dim">
       <div className="h-16 border-b border-outline-variant bg-surface-container px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Box className="h-5 w-5 text-outline" />
@@ -23,9 +23,9 @@ export function ResourceListPage() {
           {loading ? "Loading..." : `${resources.length} total`}
         </span>
       </div>
-      <div className="flex-1 overflow-auto p-4 md:p-6">
-        <Card className="border-outline-variant bg-surface-container rounded-lg overflow-hidden shadow-none">
-          <CardContent className="p-0">
+      <div className="flex-1 overflow-hidden p-4 md:p-6">
+        <Card className="h-full flex flex-col border-outline-variant bg-surface-container rounded-lg overflow-hidden shadow-none">
+          <CardContent className="flex-1 overflow-auto p-0">
             <ResourceTable
               resources={resources}
               loading={loading}

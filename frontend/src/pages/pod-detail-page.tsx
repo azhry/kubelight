@@ -19,7 +19,7 @@ export function PodDetailPage() {
   const pod = resources.find((r) => r.name === name);
 
   return (
-    <div className="flex-1 flex flex-col bg-surface-dim">
+    <div className="h-full overflow-hidden flex flex-col bg-surface-dim">
       <header className="h-16 border-b border-outline-variant bg-surface-container px-6 flex items-center gap-4 shrink-0">
         <Button
           variant="ghost"
@@ -103,7 +103,7 @@ export function PodDetailPage() {
         </div>
       </div>
 
-      <div className="h-[45%] min-h-[200px] border-t border-outline-variant flex flex-col bg-surface shrink-0">
+      <div className="h-[45%] max-h-[50vh] min-h-[200px] border-t border-outline-variant flex flex-col bg-surface shrink-0">
         <LogViewer
           logs={logs}
           streaming={streaming}
