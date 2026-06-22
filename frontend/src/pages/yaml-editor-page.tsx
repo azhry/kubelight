@@ -38,7 +38,7 @@ export function YamlEditorPage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-surface-dim">
+    <div className="h-full overflow-hidden flex flex-col bg-surface-dim">
       <header className="h-16 border-b border-outline-variant bg-surface-container px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-outline" />
@@ -64,7 +64,7 @@ export function YamlEditorPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
+      <div className="flex-1 overflow-hidden p-4 md:p-6 space-y-4">
         {!selectedResource ? (
           <div className="flex-1 flex items-center justify-center text-on-surface-variant min-h-[200px]">
             <p className="text-sm">Select a resource to edit its YAML</p>
@@ -76,8 +76,8 @@ export function YamlEditorPage() {
           </div>
         ) : (
           <>
-            <Card className="border-outline-variant bg-surface-container rounded-lg overflow-hidden shadow-none">
-              <CardContent className="p-0 h-[50vh]">
+            <Card className="h-full flex flex-col border-outline-variant bg-surface-container rounded-lg overflow-hidden shadow-none">
+              <CardContent className="flex-1 overflow-hidden p-0">
                 <CodeMirror value={yamlStr} onChange={setYamlStr} />
               </CardContent>
             </Card>

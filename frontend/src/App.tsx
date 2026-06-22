@@ -12,7 +12,7 @@ import { YamlEditorPage } from "./pages/yaml-editor-page";
 
 export function AppLayout() {
   return (
-    <div className="dark min-h-screen bg-background text-foreground flex flex-col">
+    <div className="dark h-screen overflow-hidden bg-background text-foreground flex flex-col">
       <ToastContainer />
       <header className="h-16 border-b border-outline-variant bg-surface-container px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -27,7 +27,7 @@ export function AppLayout() {
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-hidden">
           <Routes>
             <Route path="/:kind" element={<ResourceListPage />} />
             <Route path="/pods/:namespace/:name" element={<PodDetailPage />} />
