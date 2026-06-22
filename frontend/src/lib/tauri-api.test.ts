@@ -23,7 +23,7 @@ describe("IPC wiring integration", () => {
     });
     setMockInvoke("stream_pod_logs", () => {});
     setMockInvoke("get_resource_yaml", () => "apiVersion: v1\nkind: Pod");
-    setMockInvoke("patch_resource", () => {});
+    setMockInvoke("apply_resource", () => {});
   });
 
   afterEach(() => {
@@ -101,12 +101,8 @@ describe("IPC wiring integration", () => {
     expect(result.current.streaming).toBe(false);
   });
 
-  it("useYamlEditor fetches and patches YAML", async () => {
-    const { result } = renderHook(() => useYamlEditor("pods", undefined));
-
-    await act(async () => {
-      await result.current.fetchYaml("nginx");
-    });
+  it("useYamlEditor fetches and applies YAML", async () => {
+    const { result } = renderHook(() => useYamlEditor("pods", undefined, "nginx"));
 
     await waitFor(() => expect(result.current.yamlStr).toBe("apiVersion: v1\nkind: Pod"));
     expect(result.current.originalYaml).toBe("apiVersion: v1\nkind: Pod");
@@ -118,7 +114,7 @@ describe("IPC wiring integration", () => {
     await waitFor(() => expect(result.current.hasChanges).toBe(true));
 
     await act(async () => {
-      await result.current.applyPatch("nginx");
+      await result.current.apply();
     });
   });
 

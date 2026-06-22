@@ -24,7 +24,6 @@ describe("Sidebar", () => {
     expect(screen.getByText("Services")).toBeInTheDocument();
     expect(screen.getByText("Cluster")).toBeInTheDocument();
     expect(screen.getByText("Config")).toBeInTheDocument();
-    expect(screen.getByText("YAML Editor")).toBeInTheDocument();
   });
 
   it("navigates to the selected resource kind", async () => {
@@ -41,19 +40,6 @@ describe("Sidebar", () => {
 
     await user.click(screen.getByText("Services"));
     expect(screen.getByTestId("location")).toHaveTextContent("/services");
-  });
-
-  it("navigates to the YAML editor", async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter initialEntries={["/pods"]}>
-        <Sidebar />
-        <LocationDisplay />
-      </MemoryRouter>
-    );
-
-    await user.click(screen.getByText("YAML Editor"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/yaml/pods");
   });
 
   it("marks the active resource kind", () => {

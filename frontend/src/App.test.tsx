@@ -81,16 +81,6 @@ describe("App routing", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Services" })).toBeInTheDocument());
   });
 
-  it("navigates to the YAML editor", async () => {
-    const user = userEvent.setup();
-    renderApp(["/pods"]);
-
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Pods" })).toBeInTheDocument());
-
-    await user.click(screen.getByText("YAML Editor"));
-    await waitFor(() => expect(screen.getByRole("heading", { name: "YAML Editor" })).toBeInTheDocument());
-  });
-
   it("navigates to pod detail from the resource list", async () => {
     const user = userEvent.setup();
     renderApp(["/pods"]);
