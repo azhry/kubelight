@@ -1,8 +1,10 @@
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::Pod;
-use kube::api::{Api, Patch, PatchParams, PostParams};
+use kube::api::{Api, AttachParams, Patch, PatchParams, PostParams};
 use kube::Client;
+use serde::Serialize;
 use serde_json::Value;
+use tokio::io::AsyncBufReadExt;
 
 enum ResourceApi {
     Pods(Api<Pod>),
@@ -111,6 +113,157 @@ pub async fn get_resource_yaml(
         .await
         .map_err(|e| format!("Get resource failed: {}", e))?;
     serde_yaml::to_string(&resource).map_err(|e| format!("YAML serialize failed: {}", e))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecOutput {
+    pub stream: String,
+    pub text: String,
+}
+
+pub async fn exec_pod<F>(
+    client: &Client,
+    namespace: &str,
+    pod_name: &str,
+    container: Option<&str>,
+    command: Vec<String>,
+    emit: F,
+) -> Result<(), String>
+where
+    F: Fn(ExecOutput) + Send + 'static,
+{
+    let api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+
+    let container_name = match container {
+        Some(c) => c.to_string(),
+        None => {
+            let pod = api
+                .get(pod_name)
+                .await
+                .map_err(|e| format!("Get pod failed: {}", e))?;
+            pod.spec
+                .as_ref()
+                .and_then(|s| s.containers.first())
+                .map(|c| c.name.clone())
+                .ok_or_else(|| "Pod has no containers".to_string())?
+        }
+    };
+
+    let exec_command = if command.is_empty() {
+        vec!["/bin/sh".to_string()]
+    } else {
+        command
+    };
+
+    let ap = AttachParams::default()
+        .container(container_name)
+        .stdout(true)
+        .stderr(true);
+
+    let mut attached = api
+        .exec(pod_name, exec_command, &ap)
+        .await
+        .map_err(|e| format!("Exec failed: {}", e))?;
+
+    tokio::spawn(async move {
+        let stdout = attached.stdout();
+        let stderr = attached.stderr();
+
+        let mut stdout_lines = stdout.map(|s| tokio::io::BufReader::new(s).lines());
+        let mut stderr_lines = stderr.map(|s| tokio::io::BufReader::new(s).lines());
+
+        loop {
+            tokio::select! {
+                line = async {
+                    match stdout_lines.as_mut() {
+                        Some(l) => l.next_line().await,
+                        None => Ok(None),
+                    }
+                } => {
+                    match line {
+                        Ok(Some(text)) => emit(ExecOutput { stream: "stdout".into(), text }),
+                        Ok(None) => {
+                            stdout_lines = None;
+                        }
+                        Err(e) => {
+                            emit(ExecOutput { stream: "error".into(), text: format!("stdout read error: {}", e) });
+                            break;
+                        }
+                    }
+                }
+                line = async {
+                    match stderr_lines.as_mut() {
+                        Some(l) => l.next_line().await,
+                        None => Ok(None),
+                    }
+                } => {
+                    match line {
+                        Ok(Some(text)) => emit(ExecOutput { stream: "stderr".into(), text }),
+                        Ok(None) => {
+                            stderr_lines = None;
+                        }
+                        Err(e) => {
+                            emit(ExecOutput { stream: "error".into(), text: format!("stderr read error: {}", e) });
+                            break;
+                        }
+                    }
+                }
+                else => break,
+            }
+
+            if stdout_lines.is_none() && stderr_lines.is_none() {
+                break;
+            }
+        }
+
+        let _ = attached.join().await;
+    });
+
+    Ok(())
+}
+
+pub async fn port_forward(
+    client: &Client,
+    namespace: &str,
+    pod_name: &str,
+    local_port: u16,
+    pod_port: u16,
+) -> Result<(), String> {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", local_port))
+        .await
+        .map_err(|e| format!("Failed to bind local port {}: {}", local_port, e))?;
+
+    let ns = namespace.to_string();
+    let pod = pod_name.to_string();
+    let client = client.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = match listener.accept().await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("port-forward accept failed: {}", e);
+                    break;
+                }
+            };
+
+            let api: Api<Pod> = Api::namespaced(client.clone(), &ns);
+            match api.portforward(&pod, &[pod_port]).await {
+                Ok(mut pf) => {
+                    if let Some(mut stream) = pf.take_stream(pod_port) {
+                        let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                    } else {
+                        tracing::error!("port-forward stream not available for port {}", pod_port);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("port-forward request failed: {}", e);
+                }
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[cfg(test)]
