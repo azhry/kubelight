@@ -7,4 +7,6 @@ export const resourceKinds = [
   { kind: "configmaps", label: "ConfigMaps", icon: "FileText" },
   { kind: "secrets", label: "Secrets", icon: "Key" },
   { kind: "events", label: "Events", icon: "Activity" },
+  { kind: "ingresses", label: "Ingresses", icon: "Globe" },
+  { kind: "ingressclasses", label: "IngressClasses", icon: "Globe" },
 ];
