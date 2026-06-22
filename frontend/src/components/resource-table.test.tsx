@@ -70,6 +70,55 @@ describe("ResourceTable", () => {
     expect(rows()[2]).toHaveTextContent("nginx");
   });
 
+  it("sorts rows by parsed age in ascending and descending order", async () => {
+    const ageResources: ResourceItem[] = [
+      { name: "old", namespace: "default", kind: "pods", status: "Running", age: "2d" },
+      { name: "newest", namespace: "default", kind: "pods", status: "Running", age: "5m" },
+      { name: "young", namespace: "default", kind: "pods", status: "Running", age: "1h" },
+    ];
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <ResourceTable resources={ageResources} loading={false} error={null} kind="pods" />
+      </MemoryRouter>
+    );
+
+    const ageHeader = screen.getByText("Age").closest("th")!;
+    const rows = () => screen.getAllByRole("row").slice(1);
+
+    await user.click(ageHeader);
+    expect(rows()[0]).toHaveTextContent("newest");
+    expect(rows()[1]).toHaveTextContent("young");
+    expect(rows()[2]).toHaveTextContent("old");
+
+    await user.click(ageHeader);
+    expect(rows()[0]).toHaveTextContent("old");
+    expect(rows()[1]).toHaveTextContent("young");
+    expect(rows()[2]).toHaveTextContent("newest");
+  });
+
+  it("treats missing or unparsable age as oldest when sorting", async () => {
+    const ageResources: ResourceItem[] = [
+      { name: "missing", namespace: "default", kind: "pods", status: "Running", age: undefined },
+      { name: "fresh", namespace: "default", kind: "pods", status: "Running", age: "1h" },
+      { name: "weird", namespace: "default", kind: "pods", status: "Running", age: "unknown" },
+    ];
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <ResourceTable resources={ageResources} loading={false} error={null} kind="pods" />
+      </MemoryRouter>
+    );
+
+    const ageHeader = screen.getByText("Age").closest("th")!;
+    const rows = () => screen.getAllByRole("row").slice(1);
+
+    await user.click(ageHeader);
+    expect(rows()[0]).toHaveTextContent("fresh");
+    expect(rows()[1]).toHaveTextContent("missing");
+    expect(rows()[2]).toHaveTextContent("weird");
+  });
+
   it("navigates to pod detail when a pod row is clicked", async () => {
     const user = userEvent.setup();
     render(
