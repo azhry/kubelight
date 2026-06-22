@@ -591,4 +591,62 @@ mod tests {
         assert_eq!(item.namespace, "");
         assert_eq!(item.status, "k8s.io/ingress-nginx");
     }
+
+    #[test]
+    fn test_ingress_to_item_no_class() {
+        let ingress = Ingress {
+            metadata: meta("web-ingress", Some("default")),
+            spec: Some(IngressSpec {
+                ingress_class_name: None,
+                rules: Some(vec![Default::default()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let item = ingress_to_item(ingress);
+        assert!(item.status.contains("default"));
+        assert!(item.status.contains("1 host"));
+    }
+
+    #[test]
+    fn test_ingress_to_item_zero_hosts() {
+        let ingress = Ingress {
+            metadata: meta("web-ingress", Some("default")),
+            spec: Some(IngressSpec {
+                ingress_class_name: Some("nginx".to_string()),
+                rules: Some(vec![]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let item = ingress_to_item(ingress);
+        assert!(item.status.contains("nginx"));
+        assert!(item.status.contains("0 hosts"));
+    }
+
+    #[test]
+    fn test_ingress_class_to_item_no_controller() {
+        let ic = IngressClass {
+            metadata: meta("nginx", None),
+            spec: Some(IngressClassSpec {
+                controller: None,
+                parameters: None,
+            }),
+            ..Default::default()
+        };
+        let item = ingress_class_to_item(ic);
+        assert_eq!(item.status, "Unknown");
+    }
+
+    #[test]
+    fn test_list_resources_dispatches_ingresses() {
+        let result = list_resources_kind_dispatch("ingresses");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_list_resources_dispatches_ingressclasses() {
+        let result = list_resources_kind_dispatch("ingressclasses");
+        assert!(result.is_ok());
+    }
 }
