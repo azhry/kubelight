@@ -118,4 +118,18 @@ describe("App routing", () => {
 
     expect(main).toHaveClass("flex-1", "overflow-hidden");
   });
+
+  it("renders the YAML editor for the per-resource edit route", async () => {
+    renderApp(["/edit/deployments/default/nginx"]);
+
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toBeInTheDocument());
+    expect(screen.getByTestId("location")).toHaveTextContent("/edit/deployments/default/nginx");
+  });
+
+  it("lists ingress and ingress class resources in the sidebar", () => {
+    renderApp(["/pods"]);
+
+    expect(screen.getByText("Ingresses")).toBeInTheDocument();
+    expect(screen.getByText("IngressClasses")).toBeInTheDocument();
+  });
 });

@@ -175,4 +175,50 @@ describe("ResourceTable", () => {
 
     expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
   });
+
+  it("renders ingress resources with status badges", () => {
+    const ingresses: ResourceItem[] = [
+      { name: "public", namespace: "default", kind: "ingresses", status: "Active", age: "1d" },
+    ];
+
+    render(
+      <MemoryRouter>
+        <ResourceTable resources={ingresses} loading={false} error={null} kind="ingresses" />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("public")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+  });
+
+  it("navigates to the per-resource edit route when the edit button is clicked", async () => {
+    const user = userEvent.setup();
+    const editables: ResourceItem[] = [
+      { name: "my-ingress", namespace: "default", kind: "ingresses", status: "Active", age: "1d" },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={["/ingresses"]}>
+        <ResourceTable resources={editables} loading={false} error={null} kind="ingresses" />
+        <LocationDisplay />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTitle("Edit YAML"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/edit/ingresses/default/my-ingress");
+  });
+
+  it("does not render an edit button for non-editable kinds", () => {
+    const items: ResourceItem[] = [
+      { name: "nginx", namespace: "default", kind: "ingressclasses", status: "Active", age: "1d" },
+    ];
+
+    render(
+      <MemoryRouter>
+        <ResourceTable resources={items} loading={false} error={null} kind="ingressclasses" />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByTitle("Edit YAML")).not.toBeInTheDocument();
+  });
 });
