@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Pencil } from "lucide-react";
 import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 import { StatusBadge } from "./status-badge";
 import type { ResourceItem } from "../hooks/use-resources";
 
@@ -17,7 +18,17 @@ const columns: Column[] = [
   { key: "namespace", label: "Namespace", sortable: true },
   { key: "status", label: "Status", sortable: true, width: "w-32" },
   { key: "age", label: "Age", sortable: true, width: "w-24" },
+  { key: "actions", label: "", sortable: false, width: "w-16" },
 ];
+
+const editableKinds = new Set([
+  "pods",
+  "deployments",
+  "services",
+  "configmaps",
+  "secrets",
+  "ingresses",
+]);
 
 type SortDir = "asc" | "desc" | null;
 
@@ -165,6 +176,22 @@ export function ResourceTable({
                 </td>
                 <td className="px-4 py-2.5 text-on-surface-variant text-right">
                   {item.age || "-"}
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  {editableKinds.has(kind) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/edit/${kind}/${item.namespace || "-"}/${item.name}`);
+                      }}
+                      className="h-7 px-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high"
+                      title="Edit YAML"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </td>
               </tr>
             );
