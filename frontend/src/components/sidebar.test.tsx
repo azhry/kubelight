@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -53,5 +53,33 @@ describe("Sidebar", () => {
     const activeButton = screen.getByText("Deployments").closest("button");
     expect(activeButton).toHaveClass("text-primary");
     expect(activeButton).toHaveClass("border-primary");
+  });
+
+  it("renders a full-height sidebar that stays above main content", () => {
+    render(
+      <MemoryRouter initialEntries={["/pods"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const aside = screen.getByText("Pods").closest("aside");
+    expect(aside).toHaveClass("h-full", "flex-shrink-0", "z-40");
+  });
+
+  it("scrolls navigation independently without losing the header", () => {
+    render(
+      <MemoryRouter initialEntries={["/pods"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const nav = screen.getByText("Workloads").closest("nav");
+    expect(nav).toHaveClass("overflow-y-auto");
+
+    nav!.scrollTop = 100;
+    fireEvent.scroll(nav!);
+
+    expect(screen.getByText("KubeLight")).toBeVisible();
+    expect(screen.getByText("Pods")).toBeVisible();
   });
 });

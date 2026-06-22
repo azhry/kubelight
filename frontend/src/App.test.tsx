@@ -91,4 +91,31 @@ describe("App routing", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "nginx" })).toBeInTheDocument());
     expect(screen.getByPlaceholderText("Filter logs...")).toBeInTheDocument();
   });
+
+  it("uses a full-viewport root container that hides overflow", () => {
+    renderApp(["/pods"]);
+
+    const main = screen.getByRole("main");
+    const flexRow = main.parentElement;
+    const root = flexRow?.parentElement;
+
+    expect(root).toHaveClass("h-screen", "overflow-hidden", "flex", "flex-col");
+  });
+
+  it("wraps sidebar and main content in a non-scrolling flex row", () => {
+    renderApp(["/pods"]);
+
+    const main = screen.getByRole("main");
+    const flexRow = main.parentElement;
+
+    expect(flexRow).toHaveClass("flex", "flex-1", "overflow-hidden");
+  });
+
+  it("keeps the main content area clipped so only internal panes scroll", () => {
+    renderApp(["/pods"]);
+
+    const main = screen.getByRole("main");
+
+    expect(main).toHaveClass("flex-1", "overflow-hidden");
+  });
 });
