@@ -71,11 +71,11 @@ describe("PodDetailTabs", () => {
     );
   });
 
-  it("renders the Diagnostics tab placeholder", () => {
+  it("renders the Diagnostics tab UI", () => {
     render(<PodDetailTabs resource={podResource} />);
 
     fireEvent.click(screen.getByText("Diagnostics"));
 
-    expect(screen.getByText(/pod network diagnostics/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/target pod, service, or url/i)).toBeInTheDocument();
   });
 });

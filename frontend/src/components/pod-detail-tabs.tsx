@@ -5,6 +5,7 @@ import { Input } from "./ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { StatusBadge } from "./status-badge";
 import { LogViewer } from "./log-viewer";
+import { NetworkDiagnostics } from "./network-diagnostics";
 import { useLogStream } from "../hooks/use-log-stream";
 import { useExec } from "../hooks/use-exec";
 import { useYamlEditor } from "../hooks/use-yaml-editor";
@@ -200,10 +201,7 @@ export function PodDetailTabs({ resource }: PodDetailTabsProps) {
         )}
 
         {activeTab === "diagnostics" && (
-          <div className="h-full flex flex-col items-center justify-center p-6 text-on-surface-variant">
-            <Activity className="h-8 w-8 mb-3 opacity-50" />
-            <p className="text-sm">Pod network diagnostics will be added in FE-033.</p>
-          </div>
+          <NetworkDiagnostics namespace={namespace} podName={podName} />
         )}
 
         {activeTab === "yaml" && (
