@@ -10,7 +10,7 @@ mod sessions;
 
 use context::{ContextInfo, ContextManager};
 use kube::Client;
-use operations::ExecOutput;
+use operations::{ExecOutput, NetworkDiagnosticResult};
 use resources::ResourceItem;
 use serde::{Deserialize, Serialize};
 use sessions::{KubeconfigSummary, KubeconfigSession, SessionManager};
@@ -582,6 +582,17 @@ async fn port_forward(
     port_forward_impl(&client, &namespace, &pod_name, local_port, pod_port).await
 }
 
+#[tauri::command]
+async fn diagnose_pod_network(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    source_namespace: String,
+    source_pod: String,
+    target: String,
+) -> Result<NetworkDiagnosticResult, String> {
+    let client = active_client(&state).await?;
+    operations::diagnose_pod_network(&client, &source_namespace, &source_pod, &target).await
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -685,6 +696,7 @@ fn main() {
             apply_resource,
             exec_pod,
             port_forward,
+            diagnose_pod_network,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
