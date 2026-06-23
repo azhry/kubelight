@@ -44,11 +44,13 @@ export function ResourceTable({
   loading,
   error,
   kind,
+  onEdit,
 }: {
   resources: ResourceItem[];
   loading: boolean;
   error: string | null;
   kind: string;
+  onEdit?: (item: ResourceItem) => void;
 }) {
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -176,7 +178,7 @@ export function ResourceTable({
                     size="sm"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/edit/${kind}/${item.namespace || "-"}/${item.name}`);
+                      onEdit?.(item);
                     }}
                     className="h-7 px-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high"
                     title={readOnlyKinds.has(kind) ? "View YAML (read-only)" : "Edit YAML"}
