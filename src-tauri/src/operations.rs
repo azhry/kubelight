@@ -6,6 +6,7 @@ use kube::Client;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
+use tokio::sync::mpsc;
 
 enum ResourceApi {
     Pods(Api<Pod>),
@@ -360,6 +361,108 @@ pub async fn port_forward(
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkDiagnosticResult {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+pub async fn resolve_network_target(
+    client: &Client,
+    source_namespace: &str,
+    target: &str,
+) -> Result<String, String> {
+    if target.starts_with("http://") || target.starts_with("https://") {
+        return Ok(target.to_string());
+    }
+
+    if let Some(rest) = target.strip_prefix("pod/") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        let (ns, name) = match parts.len() {
+            1 => (source_namespace, parts[0]),
+            2 => (parts[0], parts[1]),
+            _ => return Err(format!("Invalid pod target: {}", target)),
+        };
+        let api: Api<Pod> = Api::namespaced(client.clone(), ns);
+        let pod = api.get(name).await.map_err(|e| e.to_string())?;
+        let ip = pod
+            .status
+            .and_then(|s| s.pod_ip)
+            .ok_or_else(|| format!("Pod {} has no IP", name))?;
+        return Ok(format!("http://{}", ip));
+    }
+
+    let (ns, name) = if let Some(rest) = target.strip_prefix("service/") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        match parts.len() {
+            1 => (source_namespace, parts[0]),
+            2 => (parts[0], parts[1]),
+            _ => return Err(format!("Invalid service target: {}", target)),
+        }
+    } else {
+        (source_namespace, target)
+    };
+    Ok(format!("http://{}.{}.svc.cluster.local", name, ns))
+}
+
+pub async fn diagnose_pod_network(
+    client: &Client,
+    source_namespace: &str,
+    source_pod: &str,
+    target: &str,
+) -> Result<NetworkDiagnosticResult, String> {
+    let url = resolve_network_target(client, source_namespace, target).await?;
+    let command = vec![
+        "curl".to_string(),
+        "-sS".to_string(),
+        "-m".to_string(),
+        "10".to_string(),
+        url,
+    ];
+
+    let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(64);
+    let (stderr_tx, mut stderr_rx) = mpsc::channel::<String>(64);
+
+    exec_pod(
+        client,
+        source_namespace,
+        source_pod,
+        None,
+        command,
+        move |out| match out.stream.as_str() {
+            "stdout" => {
+                let _ = stdout_tx.try_send(out.text);
+            }
+            "stderr" => {
+                let _ = stderr_tx.try_send(out.text);
+            }
+            _ => {}
+        },
+    )
+    .await?;
+
+    let stdout_handle = tokio::spawn(async move {
+        let mut acc = String::new();
+        while let Some(line) = stdout_rx.recv().await {
+            acc.push_str(&line);
+            acc.push('\n');
+        }
+        acc
+    });
+    let stderr_handle = tokio::spawn(async move {
+        let mut acc = String::new();
+        while let Some(line) = stderr_rx.recv().await {
+            acc.push_str(&line);
+            acc.push('\n');
+        }
+        acc
+    });
+
+    let stdout = stdout_handle.await.map_err(|e| e.to_string())?;
+    let stderr = stderr_handle.await.map_err(|e| e.to_string())?;
+    Ok(NetworkDiagnosticResult { stdout, stderr })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +546,29 @@ mod tests {
         }), "pods", Some("default"), "nginx", "not: : valid yaml").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("YAML parse failed"));
+    }
+
+    #[test]
+    fn test_resolve_network_target_url() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let client = Client::try_from(kube::config::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap();
+            assert_eq!(
+                resolve_network_target(&client, "default", "http://example.com").await.unwrap(),
+                "http://example.com"
+            );
+            assert_eq!(
+                resolve_network_target(&client, "default", "https://example.com/path").await.unwrap(),
+                "https://example.com/path"
+            );
+            assert_eq!(
+                resolve_network_target(&client, "default", "my-svc").await.unwrap(),
+                "http://my-svc.default.svc.cluster.local"
+            );
+            assert_eq!(
+                resolve_network_target(&client, "default", "service/other-ns/my-svc").await.unwrap(),
+                "http://my-svc.other-ns.svc.cluster.local"
+            );
+        });
     }
 }
