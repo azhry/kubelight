@@ -4,12 +4,14 @@ import { Card, CardContent } from "../components/ui/card";
 import { ResourceTable } from "../components/resource-table";
 import { useResources } from "../hooks/use-resources";
 import { useYamlPanel } from "../hooks/use-yaml-panel";
+import { useDetailPanel } from "../hooks/use-detail-panel";
 import { resourceKinds } from "../lib/resource-kinds";
 
 export function ResourceListPage() {
   const { kind = "pods" } = useParams();
   const { resources, loading, error } = useResources(kind, undefined);
   const { openYamlPanel } = useYamlPanel();
+  const { openDetailPanel } = useDetailPanel();
 
   const kindInfo = resourceKinds.find((k) => k.kind === kind);
   const title = kindInfo?.label || kind.charAt(0).toUpperCase() + kind.slice(1);
@@ -34,6 +36,7 @@ export function ResourceListPage() {
               error={error}
               kind={kind}
               onEdit={(item) => openYamlPanel(kind, item.namespace || "-", item.name)}
+              onSelect={(item) => openDetailPanel(item)}
             />
           </CardContent>
         </Card>

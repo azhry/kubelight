@@ -119,30 +119,17 @@ describe("ResourceTable", () => {
     expect(rows()[2]).toHaveTextContent("weird");
   });
 
-  it("navigates to pod detail when a pod row is clicked", async () => {
+  it("calls onSelect when any row is clicked", async () => {
     const user = userEvent.setup();
+    const onSelect = vi.fn();
     render(
       <MemoryRouter initialEntries={["/pods"]}>
-        <ResourceTable resources={resources} loading={false} error={null} kind="pods" />
-        <LocationDisplay />
+        <ResourceTable resources={resources} loading={false} error={null} kind="pods" onSelect={onSelect} />
       </MemoryRouter>
     );
 
     await user.click(screen.getByText("nginx").closest("tr")!);
-    expect(screen.getByTestId("location")).toHaveTextContent("/pods/default/nginx");
-  });
-
-  it("does not navigate when kind is not pods", async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter initialEntries={["/deployments"]}>
-        <ResourceTable resources={resources} loading={false} error={null} kind="deployments" />
-        <LocationDisplay />
-      </MemoryRouter>
-    );
-
-    await user.click(screen.getByText("nginx").closest("tr")!);
-    expect(screen.getByTestId("location")).toHaveTextContent("/deployments");
+    expect(onSelect).toHaveBeenCalledWith(resources[0]);
   });
 
   it("renders an error message", () => {
