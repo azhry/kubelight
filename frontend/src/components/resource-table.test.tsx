@@ -208,9 +208,9 @@ describe("ResourceTable", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/edit/ingresses/default/my-ingress");
   });
 
-  it("does not render an edit button for non-editable kinds", () => {
+  it("renders a read-only edit button for cluster-scoped kinds", () => {
     const items: ResourceItem[] = [
-      { name: "nginx", namespace: "default", kind: "ingressclasses", status: "Active", age: "1d" },
+      { name: "nginx", namespace: "-", kind: "ingressclasses", status: "Active", age: "1d" },
     ];
 
     render(
@@ -219,6 +219,6 @@ describe("ResourceTable", () => {
       </MemoryRouter>
     );
 
-    expect(screen.queryByTitle("Edit YAML")).not.toBeInTheDocument();
+    expect(screen.getByTitle("View YAML (read-only)")).toBeInTheDocument();
   });
 });
