@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Container } from "lucide-react";
+import { Container, Loader2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { ContextSelector } from "./components/context-selector";
 import { NamespaceFilter } from "./components/namespace-filter";
 import { Sidebar } from "./components/sidebar";
@@ -50,6 +51,43 @@ export function AppLayout() {
 
 function App() {
   const [configured, setConfigured] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkLastKubeconfig() {
+      try {
+        const lastPath = await invoke<string | null>("get_last_kubeconfig_path");
+        const status = await invoke<{ configured: boolean; error: string | null }>("get_kubeconfig_status");
+        if (!cancelled) {
+          if (status.configured || lastPath) {
+            setConfigured(true);
+          }
+        }
+      } catch {
+        // If either call fails, fall through to the setup screen.
+      } finally {
+        if (!cancelled) {
+          setChecking(false);
+        }
+      }
+    }
+
+    checkLastKubeconfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center gap-3">
+        <Loader2 className="h-8 w-8 text-primary animate-spin" />
+        <p className="text-sm text-on-surface-variant">Reconnecting to last cluster...</p>
+      </div>
+    );
+  }
 
   if (!configured) {
     return (

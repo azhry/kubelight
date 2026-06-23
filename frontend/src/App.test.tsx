@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
-import { AppLayout } from "./App";
+import App, { AppLayout } from "./App";
 import { setMockInvoke } from "./test-utils/tauri-mocks";
 
 vi.mock("./components/codemirror", () => ({
@@ -136,5 +136,42 @@ describe("App routing", () => {
 
     expect(screen.getByText("Ingresses")).toBeInTheDocument();
     expect(screen.getByText("IngressClasses")).toBeInTheDocument();
+  });
+});
+
+describe("App auto-reconnect", () => {
+  beforeEach(() => {
+    setMockInvoke("get_last_kubeconfig_path", () => "/home/user/.kube/config");
+    setMockInvoke("get_kubeconfig_status", () => ({ configured: true, error: null }));
+    setMockInvoke("get_contexts", () => [
+      { name: "minikube", cluster: "minikube", user: "minikube", active: true },
+    ]);
+    setMockInvoke("get_active_context", () => "minikube");
+    setMockInvoke("get_resources", (args: any) => {
+      if (args.kind === "namespaces") {
+        return [{ name: "default" }, { name: "app" }];
+      }
+      return [
+        { name: "nginx", namespace: "default", kind: args.kind, status: "Running", age: "3d" },
+      ];
+    });
+  });
+
+  it("shows a reconnecting indicator while checking the last kubeconfig", () => {
+    render(<App />);
+    expect(screen.getByText("Reconnecting to last cluster...")).toBeInTheDocument();
+  });
+
+  it("skips the setup screen when the last kubeconfig is valid", async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Pods" })).toBeInTheDocument());
+  });
+
+  it("shows the setup screen when no kubeconfig is available", async () => {
+    setMockInvoke("get_last_kubeconfig_path", () => null);
+    setMockInvoke("get_kubeconfig_status", () => ({ configured: false, error: "no kubeconfig" }));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("Kubernetes Cluster Setup")).toBeInTheDocument());
   });
 });
