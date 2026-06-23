@@ -14,15 +14,15 @@ export function useExec(namespace: string, podName: string, container?: string) 
   const mountedRef = useRef(true);
 
   const exec = useCallback(
-    async (command: string) => {
-      if (!command.trim()) return;
+    async (command: string[]) => {
+      if (!command.length) return;
       setRunning(true);
       try {
         await invoke("exec_pod", {
           namespace,
           pod_name: podName,
           container: container || null,
-          command: command.trim(),
+          command,
         });
       } catch (e) {
         if (mountedRef.current) {
@@ -35,6 +35,8 @@ export function useExec(namespace: string, podName: string, container?: string) 
     },
     [namespace, podName, container]
   );
+
+  const execShell = useCallback(() => exec(["/bin/sh"]), [exec]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -56,5 +58,5 @@ export function useExec(namespace: string, podName: string, container?: string) 
 
   const clearOutput = useCallback(() => setOutput(""), []);
 
-  return { output, running, exec, clearOutput };
+  return { output, running, exec, execShell, clearOutput };
 }

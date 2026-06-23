@@ -108,7 +108,7 @@ export function LogViewer({
   const handleExecSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!command.trim()) return;
-    exec(command);
+    exec(["/bin/sh", "-c", command]);
     setCommand("");
   };
 
