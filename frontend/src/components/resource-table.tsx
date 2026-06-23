@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { ArrowUpDown, ArrowUp, ArrowDown, Pencil } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -45,14 +44,15 @@ export function ResourceTable({
   error,
   kind,
   onEdit,
+  onSelect,
 }: {
   resources: ResourceItem[];
   loading: boolean;
   error: string | null;
   kind: string;
   onEdit?: (item: ResourceItem) => void;
+  onSelect?: (item: ResourceItem) => void;
 }) {
-  const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
 
@@ -157,9 +157,7 @@ export function ResourceTable({
                   rowHover
                 )}
                 onClick={() => {
-                  if (kind === "pods") {
-                    navigate(`/pods/${item.namespace || "default"}/${item.name}`);
-                  }
+                  onSelect?.(item);
                 }}
               >
                 <td className="px-4 py-2.5 text-on-surface whitespace-nowrap">{item.name}</td>

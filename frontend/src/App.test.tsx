@@ -81,15 +81,16 @@ describe("App routing", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Services" })).toBeInTheDocument());
   });
 
-  it("navigates to pod detail from the resource list", async () => {
+  it("opens the resource detail right panel when a row is clicked", async () => {
     const user = userEvent.setup();
-    renderApp(["/pods"]);
+    renderApp(["/deployments"]);
 
     await waitFor(() => expect(screen.getByText("nginx")).toBeInTheDocument());
     await user.click(screen.getByText("nginx").closest("tr")!);
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "nginx" })).toBeInTheDocument());
-    expect(screen.getByPlaceholderText("Filter logs...")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("resource-detail-panel")).toBeInTheDocument());
+    const panel = screen.getByTestId("resource-detail-panel");
+    expect(panel).toHaveTextContent("deployments");
   });
 
   it("uses a full-viewport root container that hides overflow", () => {
