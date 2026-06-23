@@ -14,13 +14,18 @@ use operations::ExecOutput;
 use resources::ResourceItem;
 use std::sync::Arc;
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
+
+const STORE_NAME: &str = "kubelight-settings.json";
+const LAST_KUBECONFIG_KEY: &str = "last_kubeconfig_path";
 
 struct AppState {
     ctx_mgr: Option<ContextManager>,
     client_pool: ClientPool,
     config_error: Option<String>,
+    last_kubeconfig_path: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Serialize)]
@@ -35,6 +40,27 @@ async fn get_kubeconfig_status_impl(state: Arc<RwLock<AppState>>) -> KubeconfigS
         configured: app.ctx_mgr.is_some(),
         error: app.config_error.clone(),
     }
+}
+
+fn default_kubeconfig_path() -> Option<String> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)?;
+    Some(home.join(".kube").join("config").to_string_lossy().to_string())
+}
+
+fn load_last_kubeconfig_path<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let store = app.store(STORE_NAME).ok()?;
+    store
+        .get(LAST_KUBECONFIG_KEY)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+}
+
+fn save_last_kubeconfig_path<R: Runtime>(app: &AppHandle<R>, path: &str) -> Result<(), String> {
+    let store = app.store(STORE_NAME).map_err(|e| e.to_string())?;
+    store.set(LAST_KUBECONFIG_KEY, serde_json::Value::String(path.to_string()));
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 async fn reload_kubeconfig_impl(
@@ -80,10 +106,27 @@ async fn get_kubeconfig_status(state: State<'_, Arc<RwLock<AppState>>>) -> Resul
 
 #[tauri::command]
 async fn reload_kubeconfig(
+    app_handle: tauri::AppHandle,
     state: State<'_, Arc<RwLock<AppState>>>,
     path: Option<String>,
 ) -> Result<KubeconfigStatus, String> {
-    reload_kubeconfig_impl(state.inner().clone(), path).await
+    let state_arc = state.inner().clone();
+    let status = reload_kubeconfig_impl(state_arc.clone(), path.clone()).await?;
+    if status.configured {
+        let path_to_save = path.or_else(default_kubeconfig_path).unwrap_or_default();
+        if !path_to_save.is_empty() {
+            let _ = save_last_kubeconfig_path(&app_handle, &path_to_save);
+            *state_arc.write().await.last_kubeconfig_path.write().await = Some(path_to_save);
+        }
+    }
+    Ok(status)
+}
+
+#[tauri::command]
+async fn get_last_kubeconfig_path(
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<Option<String>, String> {
+    Ok(state.read().await.last_kubeconfig_path.read().await.clone())
 }
 
 async fn get_contexts_impl(app: &AppState) -> Result<Vec<ContextInfo>, String> {
@@ -403,23 +446,41 @@ fn main() {
         )
         .init();
 
-    let (ctx_mgr, config_error) = match ContextManager::new() {
-        Ok(mgr) => (Some(mgr), None),
-        Err(e) => (None, Some(e.to_string())),
-    };
-    let client_pool = ClientPool::new();
     let app_state = Arc::new(RwLock::new(AppState {
-        ctx_mgr,
-        client_pool,
-        config_error,
+        ctx_mgr: None,
+        client_pool: ClientPool::new(),
+        config_error: None,
+        last_kubeconfig_path: Arc::new(RwLock::new(None)),
     }));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(app_state)
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            let state: Arc<RwLock<AppState>> = app_handle.state::<Arc<RwLock<AppState>>>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let persisted = load_last_kubeconfig_path(&app_handle);
+                let candidate = persisted.or_else(default_kubeconfig_path);
+                if let Some(path) = candidate {
+                    if std::path::Path::new(&path).exists() {
+                        let status = reload_kubeconfig_impl(state.clone(), Some(path.clone())).await;
+                        if let Ok(status) = status {
+                            if status.configured {
+                                let _ = save_last_kubeconfig_path(&app_handle, &path);
+                                *state.write().await.last_kubeconfig_path.write().await = Some(path);
+                            }
+                        }
+                    }
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_kubeconfig_status,
             reload_kubeconfig,
+            get_last_kubeconfig_path,
             get_contexts,
             switch_context,
             get_active_context,
@@ -493,6 +554,7 @@ users:
             ctx_mgr: Some(ctx_mgr),
             client_pool: ClientPool::new(),
             config_error: None,
+            last_kubeconfig_path: Arc::new(RwLock::new(Some(path.to_string()))),
         }
     }
 
@@ -501,6 +563,7 @@ users:
             ctx_mgr: None,
             client_pool: ClientPool::new(),
             config_error: Some("no kubeconfig".to_string()),
+            last_kubeconfig_path: Arc::new(RwLock::new(None)),
         }
     }
 
