@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ScrollText, Terminal, Activity, Code, Info } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -23,14 +23,22 @@ export function PodDetailTabs({ resource }: PodDetailTabsProps) {
 
   const [activeTab, setActiveTab] = useState<"details" | "logs" | "terminal" | "diagnostics" | "yaml">("details");
   const { logs, streaming, startStream, stopStream, clearLogs } = useLogStream(namespace, podName);
-  const { output, running: execRunning, exec, clearOutput } = useExec(namespace, podName);
+  const { output, running: execRunning, exec, execShell, clearOutput } = useExec(namespace, podName);
   const { yamlStr, loading: yamlLoading, error: yamlError } = useYamlEditor("pods", namespace, podName);
   const [command, setCommand] = useState("");
+  const [shellStarted, setShellStarted] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === "terminal" && !shellStarted && !execRunning) {
+      setShellStarted(true);
+      execShell();
+    }
+  }, [activeTab, shellStarted, execRunning, execShell]);
 
   const handleExecSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!command.trim()) return;
-    exec(command);
+    exec(["/bin/sh", "-c", command.trim()]);
     setCommand("");
   };
 
@@ -154,7 +162,7 @@ export function PodDetailTabs({ resource }: PodDetailTabsProps) {
                 <span className="terminal-text">{output}</span>
               ) : (
                 <div className="flex items-center justify-center h-full text-on-surface-variant">
-                  <p className="text-sm">Enter a command to exec into the pod</p>
+                  <p className="text-sm">Connecting to {podName} with /bin/sh...</p>
                 </div>
               )}
             </div>
@@ -162,10 +170,11 @@ export function PodDetailTabs({ resource }: PodDetailTabsProps) {
               onSubmit={handleExecSubmit}
               className="border-t border-outline-variant p-2 flex items-center gap-2 bg-surface-container"
             >
+              <span className="text-on-surface-variant font-mono text-sm shrink-0">#</span>
               <Input
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                placeholder={`exec in ${podName}...`}
+                placeholder={`Run a command in ${podName}...`}
                 disabled={execRunning}
                 className="flex-1 h-9 bg-surface-container border-outline-variant text-on-surface"
               />
