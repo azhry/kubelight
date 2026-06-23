@@ -111,19 +111,23 @@ describe("App routing", () => {
     expect(flexRow).toHaveClass("flex", "flex-1", "overflow-hidden");
   });
 
-  it("keeps the main content area clipped so only internal panes scroll", () => {
+  it("keeps the main content area clipped and stacks the YAML panel below", () => {
     renderApp(["/pods"]);
 
     const main = screen.getByRole("main");
 
-    expect(main).toHaveClass("flex-1", "overflow-hidden");
+    expect(main).toHaveClass("flex-1", "overflow-hidden", "flex", "flex-col");
   });
 
-  it("renders the YAML editor for the per-resource edit route", async () => {
-    renderApp(["/edit/deployments/default/nginx"]);
+  it("opens the YAML editor bottom panel when the edit button is clicked", async () => {
+    const user = userEvent.setup();
+    renderApp(["/deployments"]);
+
+    await waitFor(() => expect(screen.getByText("nginx")).toBeInTheDocument());
+    await user.click(screen.getByTitle("Edit YAML"));
 
     await waitFor(() => expect(screen.getByTestId("yaml-editor")).toBeInTheDocument());
-    expect(screen.getByTestId("location")).toHaveTextContent("/edit/deployments/default/nginx");
+    expect(screen.getByText("Edit YAML")).toBeInTheDocument();
   });
 
   it("lists ingress and ingress class resources in the sidebar", () => {

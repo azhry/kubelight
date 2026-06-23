@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ResourceTable } from "./resource-table";
 import type { ResourceItem } from "../hooks/use-resources";
@@ -191,21 +191,21 @@ describe("ResourceTable", () => {
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
 
-  it("navigates to the per-resource edit route when the edit button is clicked", async () => {
+  it("calls onEdit when the edit button is clicked", async () => {
     const user = userEvent.setup();
     const editables: ResourceItem[] = [
       { name: "my-ingress", namespace: "default", kind: "ingresses", status: "Active", age: "1d" },
     ];
+    const onEdit = vi.fn();
 
     render(
       <MemoryRouter initialEntries={["/ingresses"]}>
-        <ResourceTable resources={editables} loading={false} error={null} kind="ingresses" />
-        <LocationDisplay />
+        <ResourceTable resources={editables} loading={false} error={null} kind="ingresses" onEdit={onEdit} />
       </MemoryRouter>
     );
 
     await user.click(screen.getByTitle("Edit YAML"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/edit/ingresses/default/my-ingress");
+    expect(onEdit).toHaveBeenCalledWith(editables[0]);
   });
 
   it("renders a read-only edit button for cluster-scoped kinds", () => {
