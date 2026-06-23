@@ -6,26 +6,54 @@ mod events;
 mod logs;
 mod operations;
 mod resources;
+mod sessions;
 
-use client::ClientPool;
 use context::{ContextInfo, ContextManager};
 use kube::Client;
 use operations::ExecOutput;
 use resources::ResourceItem;
+use serde::{Deserialize, Serialize};
+use sessions::{KubeconfigSummary, KubeconfigSession, SessionManager};
 use std::sync::Arc;
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
 const STORE_NAME: &str = "kubelight-settings.json";
 const LAST_KUBECONFIG_KEY: &str = "last_kubeconfig_path";
+const SESSIONS_KEY: &str = "kubeconfig_sessions";
+const ACTIVE_SESSION_KEY: &str = "active_kubeconfig_session_id";
+
+#[derive(Clone, Serialize, Deserialize)]
+struct StoredSession {
+    id: String,
+    label: String,
+    path: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct StoredSettings {
+    sessions: Vec<StoredSession>,
+    active_session_id: Option<String>,
+}
 
 struct AppState {
-    ctx_mgr: Option<ContextManager>,
-    client_pool: ClientPool,
+    session_mgr: SessionManager,
+    active_session_id: Arc<RwLock<Option<String>>>,
     config_error: Option<String>,
-    last_kubeconfig_path: Arc<RwLock<Option<String>>>,
+}
+
+impl AppState {
+    async fn active_session(&self) -> Option<Arc<RwLock<KubeconfigSession>>> {
+        let active_id = self.active_session_id.read().await.clone();
+        self.session_mgr.active_session(active_id.as_deref()).await
+    }
+
+    async fn require_active_session(&self) -> Result<Arc<RwLock<KubeconfigSession>>, String> {
+        self.active_session()
+            .await
+            .ok_or_else(|| "Kubeconfig not configured".to_string())
+    }
 }
 
 #[derive(Serialize)]
@@ -36,9 +64,15 @@ struct KubeconfigStatus {
 
 async fn get_kubeconfig_status_impl(state: Arc<RwLock<AppState>>) -> KubeconfigStatus {
     let app = state.read().await;
-    KubeconfigStatus {
-        configured: app.ctx_mgr.is_some(),
-        error: app.config_error.clone(),
+    match app.active_session().await {
+        Some(_) => KubeconfigStatus {
+            configured: true,
+            error: app.config_error.clone(),
+        },
+        None => KubeconfigStatus {
+            configured: false,
+            error: app.config_error.clone(),
+        },
     }
 }
 
@@ -56,11 +90,55 @@ fn load_last_kubeconfig_path<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
         .and_then(|v| v.as_str().map(|s| s.to_string()))
 }
 
-fn save_last_kubeconfig_path<R: Runtime>(app: &AppHandle<R>, path: &str) -> Result<(), String> {
+fn load_settings<R: Runtime>(app: &AppHandle<R>) -> StoredSettings {
+    let store = match app.store(STORE_NAME) {
+        Ok(s) => s,
+        Err(_) => return StoredSettings::default(),
+    };
+    store
+        .get(SESSIONS_KEY)
+        .and_then(|v| serde_json::from_value::<Vec<StoredSession>>(v).ok())
+        .map(|sessions| StoredSettings {
+            sessions,
+            active_session_id: store
+                .get(ACTIVE_SESSION_KEY)
+                .and_then(|v| v.as_str().map(|s| s.to_string())),
+        })
+        .unwrap_or_default()
+}
+
+fn save_settings<R: Runtime>(app: &AppHandle<R>, settings: &StoredSettings) -> Result<(), String> {
     let store = app.store(STORE_NAME).map_err(|e| e.to_string())?;
-    store.set(LAST_KUBECONFIG_KEY, serde_json::Value::String(path.to_string()));
+    store.set(
+        SESSIONS_KEY,
+        serde_json::to_value(&settings.sessions).map_err(|e| e.to_string())?,
+    );
+    store.set(
+        ACTIVE_SESSION_KEY,
+        serde_json::to_value(&settings.active_session_id).map_err(|e| e.to_string())?,
+    );
     store.save().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+async fn persist_sessions<R: Runtime>(
+    app: &AppHandle<R>,
+    app_state: &AppState,
+) -> Result<(), String> {
+    let active_id = app_state.active_session_id.read().await.clone();
+    let summaries = app_state.session_mgr.list(active_id.as_deref()).await;
+    let settings = StoredSettings {
+        sessions: summaries
+            .into_iter()
+            .map(|s| StoredSession {
+                id: s.id,
+                label: s.label,
+                path: s.path,
+            })
+            .collect(),
+        active_session_id: active_id,
+    };
+    save_settings(app, &settings)
 }
 
 async fn reload_kubeconfig_impl(
@@ -68,33 +146,62 @@ async fn reload_kubeconfig_impl(
     path: Option<String>,
 ) -> Result<KubeconfigStatus, String> {
     let mut app = state.write().await;
-    match ContextManager::load(path.as_deref()) {
-        Ok(ctx_mgr) => {
-            let kubeconfig = ctx_mgr.kubeconfig().await;
-            app.ctx_mgr = Some(ctx_mgr);
-            app.config_error = None;
-            match app.client_pool.refresh_with_config(&kubeconfig).await {
-                Ok(_) => Ok(KubeconfigStatus {
-                    configured: true,
-                    error: None,
-                }),
-                Err(e) => {
-                    app.config_error = Some(e.clone());
-                    Ok(KubeconfigStatus {
+    if let Some(active) = app.active_session().await {
+        let mut session = active.write().await;
+        let path_to_load = path.unwrap_or_else(|| session.path.clone());
+        match ContextManager::load(Some(&path_to_load)) {
+            Ok(ctx_mgr) => {
+                let kubeconfig = ctx_mgr.kubeconfig().await;
+                session.ctx_mgr = ctx_mgr;
+                session.path = path_to_load;
+                app.config_error = None;
+                match session.client_pool.refresh_with_config(&kubeconfig).await {
+                    Ok(_) => Ok(KubeconfigStatus {
                         configured: true,
-                        error: Some(e),
-                    })
+                        error: None,
+                    }),
+                    Err(e) => {
+                        app.config_error = Some(e.clone());
+                        Ok(KubeconfigStatus {
+                            configured: true,
+                            error: Some(e),
+                        })
+                    }
                 }
             }
+            Err(e) => {
+                let err = e.to_string();
+                app.config_error = Some(err.clone());
+                Ok(KubeconfigStatus {
+                    configured: false,
+                    error: Some(err),
+                })
+            }
         }
-        Err(e) => {
-            app.ctx_mgr = None;
-            let err = e.to_string();
-            app.config_error = Some(err.clone());
-            Ok(KubeconfigStatus {
-                configured: false,
-                error: Some(err),
-            })
+    } else {
+        let path_to_load = path
+            .or_else(default_kubeconfig_path)
+            .ok_or_else(|| "No kubeconfig path provided".to_string())?;
+        match app
+            .session_mgr
+            .add(path_to_load.clone(), "default".to_string())
+            .await
+        {
+            Ok(id) => {
+                *app.active_session_id.write().await = Some(id);
+                app.config_error = None;
+                Ok(KubeconfigStatus {
+                    configured: true,
+                    error: None,
+                })
+            }
+            Err(e) => {
+                app.config_error = Some(e.clone());
+                Ok(KubeconfigStatus {
+                    configured: false,
+                    error: Some(e),
+                })
+            }
         }
     }
 }
@@ -113,11 +220,7 @@ async fn reload_kubeconfig(
     let state_arc = state.inner().clone();
     let status = reload_kubeconfig_impl(state_arc.clone(), path.clone()).await?;
     if status.configured {
-        let path_to_save = path.or_else(default_kubeconfig_path).unwrap_or_default();
-        if !path_to_save.is_empty() {
-            let _ = save_last_kubeconfig_path(&app_handle, &path_to_save);
-            *state_arc.write().await.last_kubeconfig_path.write().await = Some(path_to_save);
-        }
+        let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
     }
     Ok(status)
 }
@@ -126,36 +229,125 @@ async fn reload_kubeconfig(
 async fn get_last_kubeconfig_path(
     state: State<'_, Arc<RwLock<AppState>>>,
 ) -> Result<Option<String>, String> {
-    Ok(state.read().await.last_kubeconfig_path.read().await.clone())
+    let app = state.read().await;
+    match app.active_session().await {
+        Some(session) => Ok(Some(session.read().await.path.clone())),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+async fn list_kubeconfigs(
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<Vec<KubeconfigSummary>, String> {
+    let app = state.read().await;
+    let active_id = app.active_session_id.read().await.clone();
+    Ok(app.session_mgr.list(active_id.as_deref()).await)
+}
+
+#[tauri::command]
+async fn add_kubeconfig(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+    path: String,
+    label: Option<String>,
+) -> Result<String, String> {
+    let label = label.unwrap_or_else(|| {
+        std::path::Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone())
+    });
+    let state_arc = state.inner().clone();
+    let id = {
+        let app = state_arc.read().await;
+        app.session_mgr.add(path, label).await?
+    };
+    {
+        let active_id = state_arc.read().await.active_session_id.clone();
+        if active_id.read().await.is_none() {
+            *active_id.write().await = Some(id.clone());
+        }
+    }
+    let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
+    Ok(id)
+}
+
+#[tauri::command]
+async fn remove_kubeconfig(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+    id: String,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    let active_id_before = {
+        let app = state_arc.read().await;
+        let id = app.active_session_id.read().await.clone();
+        id
+    };
+    {
+        let app = state_arc.read().await;
+        app.session_mgr.remove(&id).await?;
+    }
+    if active_id_before.as_deref() == Some(&id) {
+        let new_active = state_arc.read().await.session_mgr.first_session_id().await;
+        let active_id = state_arc.read().await.active_session_id.clone();
+        *active_id.write().await = new_active;
+    }
+    let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn switch_kubeconfig(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+    id: String,
+) -> Result<(), String> {
+    let state_arc = state.inner().clone();
+    {
+        let app = state_arc.read().await;
+        if app.session_mgr.get(&id).await.is_none() {
+            return Err(format!("Kubeconfig session '{}' not found", id));
+        }
+    }
+    {
+        let active_id = state_arc.read().await.active_session_id.clone();
+        *active_id.write().await = Some(id);
+    }
+    let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
+    Ok(())
 }
 
 async fn get_contexts_impl(app: &AppState) -> Result<Vec<ContextInfo>, String> {
-    match &app.ctx_mgr {
-        Some(mgr) => Ok(mgr.list_contexts().await),
-        None => Err("Kubeconfig not configured".to_string()),
-    }
+    let session = app.require_active_session().await?;
+    let s = session.read().await;
+    Ok(s.ctx_mgr.list_contexts().await)
 }
 
 async fn switch_context_impl(app: &AppState, context_name: &str) -> Result<(), String> {
-    match &app.ctx_mgr {
-        Some(mgr) => {
-            mgr.switch_context(context_name).await?;
-            let kubeconfig = mgr.kubeconfig().await;
-            app.client_pool
-                .refresh_with_config(&kubeconfig)
-                .await
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        None => Err("Kubeconfig not configured".to_string()),
-    }
+    let session = app.require_active_session().await?;
+    let s = session.write().await;
+    s.ctx_mgr.switch_context(context_name).await?;
+    let kubeconfig = s.ctx_mgr.kubeconfig().await;
+    s.client_pool
+        .refresh_with_config(&kubeconfig)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 async fn get_active_context_impl(app: &AppState) -> Result<String, String> {
-    match &app.ctx_mgr {
-        Some(mgr) => Ok(mgr.active_context_name().await),
-        None => Err("Kubeconfig not configured".to_string()),
-    }
+    let session = app.require_active_session().await?;
+    let s = session.read().await;
+    Ok(s.ctx_mgr.active_context_name().await)
+}
+
+async fn active_client(state: &State<'_, Arc<RwLock<AppState>>>) -> Result<Client, String> {
+    let app = state.read().await;
+    let session = app.require_active_session().await?;
+    let s = session.read().await;
+    s.client_pool.get_or_init().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -199,12 +391,7 @@ async fn get_resources(
     kind: String,
     namespace: Option<String>,
 ) -> Result<Vec<ResourceItem>, String> {
-    let app = state.read().await;
-    let client = app
-        .client_pool
-        .get_or_init()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = active_client(&state).await?;
     get_resources_impl(&client, &kind, namespace).await
 }
 
@@ -213,12 +400,7 @@ async fn get_pod_names(
     state: State<'_, Arc<RwLock<AppState>>>,
     namespace: String,
 ) -> Result<Vec<String>, String> {
-    let app = state.read().await;
-    let client = app
-        .client_pool
-        .get_or_init()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = active_client(&state).await?;
     get_pod_names_impl(&client, &namespace).await
 }
 
@@ -249,13 +431,7 @@ async fn stream_pod_logs(
     pod_name: String,
     container: Option<String>,
 ) -> Result<(), String> {
-    let client = {
-        let app = state.read().await;
-        app.client_pool
-            .get_or_init()
-            .await
-            .map_err(|e| e.to_string())?
-    };
+    let client = active_client(&state).await?;
 
     start_log_stream(client, namespace, pod_name, container, move |line| {
         let _ = app_handle.emit("log-line", &line);
@@ -310,12 +486,7 @@ async fn patch_resource(
     name: String,
     patch_body: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let app = state.read().await;
-    let client = app
-        .client_pool
-        .get_or_init()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = active_client(&state).await?;
     patch_resource_impl(&client, &kind, namespace, &name, patch_body).await
 }
 
@@ -326,12 +497,7 @@ async fn scale_deployment(
     name: String,
     replicas: i32,
 ) -> Result<serde_json::Value, String> {
-    let app = state.read().await;
-    let client = app
-        .client_pool
-        .get_or_init()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = active_client(&state).await?;
     scale_deployment_impl(&client, &namespace, &name, replicas).await
 }
 
@@ -342,12 +508,7 @@ async fn get_resource_yaml(
     namespace: Option<String>,
     name: String,
 ) -> Result<String, String> {
-    let app = state.read().await;
-    let client = app
-        .client_pool
-        .get_or_init()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = active_client(&state).await?;
     get_resource_yaml_impl(&client, &kind, namespace, &name).await
 }
 
@@ -359,12 +520,7 @@ async fn apply_resource(
     name: String,
     yaml: String,
 ) -> Result<serde_json::Value, String> {
-    let app = state.read().await;
-    let client = app
-        .client_pool
-        .get_or_init()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = active_client(&state).await?;
     apply_resource_impl(&client, &kind, namespace, &name, &yaml).await
 }
 
@@ -398,13 +554,7 @@ async fn exec_pod(
     container: Option<String>,
     command: Vec<String>,
 ) -> Result<(), String> {
-    let client = {
-        let app = state.read().await;
-        app.client_pool
-            .get_or_init()
-            .await
-            .map_err(|e| e.to_string())?
-    };
+    let client = active_client(&state).await?;
 
     exec_pod_impl(
         &client,
@@ -427,13 +577,7 @@ async fn port_forward(
     local_port: u16,
     pod_port: u16,
 ) -> Result<(), String> {
-    let client = {
-        let app = state.read().await;
-        app.client_pool
-            .get_or_init()
-            .await
-            .map_err(|e| e.to_string())?
-    };
+    let client = active_client(&state).await?;
 
     port_forward_impl(&client, &namespace, &pod_name, local_port, pod_port).await
 }
@@ -447,10 +591,9 @@ fn main() {
         .init();
 
     let app_state = Arc::new(RwLock::new(AppState {
-        ctx_mgr: None,
-        client_pool: ClientPool::new(),
+        session_mgr: SessionManager::new(),
+        active_session_id: Arc::new(RwLock::new(None)),
         config_error: None,
-        last_kubeconfig_path: Arc::new(RwLock::new(None)),
     }));
 
     tauri::Builder::default()
@@ -459,17 +602,62 @@ fn main() {
         .manage(app_state)
         .setup(|app| {
             let app_handle = app.handle().clone();
-            let state: Arc<RwLock<AppState>> = app_handle.state::<Arc<RwLock<AppState>>>().inner().clone();
+            let state: Arc<RwLock<AppState>> =
+                app_handle.state::<Arc<RwLock<AppState>>>().inner().clone();
             tauri::async_runtime::spawn(async move {
-                let persisted = load_last_kubeconfig_path(&app_handle);
-                let candidate = persisted.or_else(default_kubeconfig_path);
-                if let Some(path) = candidate {
-                    if std::path::Path::new(&path).exists() {
-                        let status = reload_kubeconfig_impl(state.clone(), Some(path.clone())).await;
-                        if let Ok(status) = status {
-                            if status.configured {
-                                let _ = save_last_kubeconfig_path(&app_handle, &path);
-                                *state.write().await.last_kubeconfig_path.write().await = Some(path);
+                let settings = load_settings(&app_handle);
+                let mut added_any = false;
+                for stored in settings.sessions {
+                    if std::path::Path::new(&stored.path).exists() {
+                        if state
+                            .read()
+                            .await
+                            .session_mgr
+                            .add_with_id(stored.id, stored.path, stored.label)
+                            .await
+                            .is_ok()
+                        {
+                            added_any = true;
+                        }
+                    }
+                }
+                if added_any {
+                    let candidate = settings.active_session_id.clone();
+                    let validated = if let Some(id) = candidate {
+                        let app = state.read().await;
+                        if app.session_mgr.get(&id).await.is_some() {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    let active_id = if let Some(id) = validated {
+                        Some(id)
+                    } else {
+                        state.read().await.session_mgr.first_session_id().await
+                    };
+                    if let Some(id) = active_id {
+                        let active = state.read().await.active_session_id.clone();
+                        *active.write().await = Some(id);
+                    }
+                    let _ = persist_sessions(&app_handle, &*state.read().await).await;
+                } else {
+                    let persisted_last = load_last_kubeconfig_path(&app_handle);
+                    let candidate = persisted_last.or_else(default_kubeconfig_path);
+                    if let Some(path) = candidate {
+                        if std::path::Path::new(&path).exists() {
+                            if let Ok(id) = state
+                                .read()
+                                .await
+                                .session_mgr
+                                .add(path.clone(), "default".to_string())
+                                .await
+                            {
+                                let active = state.read().await.active_session_id.clone();
+                                *active.write().await = Some(id);
+                                let _ = persist_sessions(&app_handle, &*state.read().await).await;
                             }
                         }
                     }
@@ -481,6 +669,10 @@ fn main() {
             get_kubeconfig_status,
             reload_kubeconfig,
             get_last_kubeconfig_path,
+            list_kubeconfigs,
+            add_kubeconfig,
+            remove_kubeconfig,
+            switch_kubeconfig,
             get_contexts,
             switch_context,
             get_active_context,
@@ -548,29 +740,31 @@ users:
         path
     }
 
-    fn app_state_with_config(path: &str) -> AppState {
-        let ctx_mgr = ContextManager::load(Some(path)).unwrap();
+    async fn app_state_with_config(path: &str) -> AppState {
+        let session_mgr = SessionManager::new();
+        let id = session_mgr
+            .add(path.to_string(), "test".to_string())
+            .await
+            .unwrap();
         AppState {
-            ctx_mgr: Some(ctx_mgr),
-            client_pool: ClientPool::new(),
+            session_mgr,
+            active_session_id: Arc::new(RwLock::new(Some(id))),
             config_error: None,
-            last_kubeconfig_path: Arc::new(RwLock::new(Some(path.to_string()))),
         }
     }
 
     fn unconfigured_app_state() -> AppState {
         AppState {
-            ctx_mgr: None,
-            client_pool: ClientPool::new(),
+            session_mgr: SessionManager::new(),
+            active_session_id: Arc::new(RwLock::new(None)),
             config_error: Some("no kubeconfig".to_string()),
-            last_kubeconfig_path: Arc::new(RwLock::new(None)),
         }
     }
 
     #[tokio::test]
     async fn test_get_contexts_returns_contexts() {
         let path = write_temp_config(sample_kubeconfig());
-        let app = app_state_with_config(path.to_str().unwrap());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
         let contexts = get_contexts_impl(&app).await.unwrap();
         assert_eq!(contexts.len(), 2);
         assert_eq!(contexts[0].name, "ctx-a");
@@ -589,7 +783,7 @@ users:
     #[tokio::test]
     async fn test_get_active_context() {
         let path = write_temp_config(sample_kubeconfig());
-        let app = app_state_with_config(path.to_str().unwrap());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
         let active = get_active_context_impl(&app).await.unwrap();
         assert_eq!(active, "ctx-a");
         std::fs::remove_file(path).ok();
@@ -598,7 +792,7 @@ users:
     #[tokio::test]
     async fn test_switch_context_updates_active() {
         let path = write_temp_config(sample_kubeconfig());
-        let app = app_state_with_config(path.to_str().unwrap());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
         switch_context_impl(&app, "ctx-b").await.unwrap();
         let active = get_active_context_impl(&app).await.unwrap();
         assert_eq!(active, "ctx-b");
@@ -610,7 +804,7 @@ users:
     #[tokio::test]
     async fn test_switch_context_not_found() {
         let path = write_temp_config(sample_kubeconfig());
-        let app = app_state_with_config(path.to_str().unwrap());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
         let result = switch_context_impl(&app, "missing").await;
         assert!(result.is_err());
         std::fs::remove_file(path).ok();
@@ -660,7 +854,7 @@ users:
     async fn test_get_resources_command_without_client() {
         // When no kubeconfig is available, get_or_init should fail to build a client.
         let app = unconfigured_app_state();
-        let result = app.client_pool.get_or_init().await;
+        let result = app.require_active_session().await;
         assert!(result.is_err());
     }
 
@@ -688,7 +882,7 @@ users:
     #[tokio::test]
     async fn test_stream_pod_logs_command_without_client() {
         let app = unconfigured_app_state();
-        let result = app.client_pool.get_or_init().await;
+        let result = app.require_active_session().await;
         assert!(result.is_err());
     }
 
@@ -776,7 +970,7 @@ spec:
     #[tokio::test]
     async fn test_operations_command_without_client() {
         let app = unconfigured_app_state();
-        let result = app.client_pool.get_or_init().await;
+        let result = app.require_active_session().await;
         assert!(result.is_err());
     }
 
@@ -848,14 +1042,14 @@ spec:
     #[tokio::test]
     async fn test_exec_pod_command_without_client() {
         let app = unconfigured_app_state();
-        let result = app.client_pool.get_or_init().await;
+        let result = app.require_active_session().await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_port_forward_command_without_client() {
         let app = unconfigured_app_state();
-        let result = app.client_pool.get_or_init().await;
+        let result = app.require_active_session().await;
         assert!(result.is_err());
     }
 
@@ -874,7 +1068,7 @@ spec:
     #[tokio::test]
     async fn test_get_kubeconfig_status_configured() {
         let path = write_temp_config(sample_kubeconfig());
-        let app = app_state_with_config(path.to_str().unwrap());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
         let state = app_state_arc(app);
         let status = get_kubeconfig_status_impl(state).await;
         assert!(status.configured);
@@ -891,8 +1085,9 @@ spec:
             .unwrap();
         assert!(status.configured);
         let app = state.read().await;
-        assert!(app.ctx_mgr.is_some());
-        assert!(app.client_pool.has_client().await);
+        let session = app.active_session().await.unwrap();
+        assert!(session.read().await.ctx_mgr.kubeconfig().await.contexts.len() > 0);
+        assert!(session.read().await.client_pool.has_client().await);
         std::fs::remove_file(path).ok();
     }
 
@@ -905,7 +1100,7 @@ spec:
         assert!(!status.configured);
         assert!(status.error.is_some());
         let app = state.read().await;
-        assert!(app.ctx_mgr.is_none());
+        assert!(app.active_session().await.is_none());
     }
 
     #[tokio::test]
@@ -916,7 +1111,72 @@ spec:
             .await
             .unwrap();
         let app = state.read().await;
-        assert!(app.client_pool.has_client().await);
+        let session = app.active_session().await.unwrap();
+        assert!(session.read().await.client_pool.has_client().await);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_session_manager_lifecycle() {
+        let state = app_state_arc(unconfigured_app_state());
+        let path = write_temp_config(sample_kubeconfig());
+        let path_str = path.to_str().unwrap().to_string();
+
+        let id = {
+            let app = state.read().await;
+            app.session_mgr
+                .add(path_str.clone(), "first".to_string())
+                .await
+                .unwrap()
+        };
+        {
+            let app = state.read().await;
+            *app.active_session_id.write().await = Some(id.clone());
+        }
+
+        let list = {
+            let app = state.read().await;
+            app.session_mgr.list(Some(&id)).await
+        };
+        assert_eq!(list.len(), 1);
+        assert!(list[0].active);
+
+        let id2 = {
+            let app = state.read().await;
+            app.session_mgr
+                .add(path_str.clone(), "second".to_string())
+                .await
+                .unwrap()
+        };
+        {
+            let app = state.read().await;
+            *app.active_session_id.write().await = Some(id2.clone());
+        }
+
+        let list = {
+            let app = state.read().await;
+            app.session_mgr.list(Some(&id2)).await
+        };
+        assert!(list.iter().find(|s| s.id == id2).unwrap().active);
+
+        {
+            let app = state.read().await;
+            app.session_mgr.remove(&id).await.unwrap();
+        }
+        {
+            let app = state.read().await;
+            let new_active = app.session_mgr.first_session_id().await;
+            *app.active_session_id.write().await = new_active;
+        }
+
+        let list = {
+            let app = state.read().await;
+            let active_id = app.active_session_id.read().await.clone();
+            app.session_mgr.list(active_id.as_deref()).await
+        };
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, id2);
+
         std::fs::remove_file(path).ok();
     }
 }
