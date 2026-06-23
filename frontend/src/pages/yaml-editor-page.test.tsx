@@ -116,4 +116,19 @@ describe("YamlEditorPage", () => {
 
     await waitFor(() => expect(screen.getByText(/cannot fetch yaml/i)).toBeInTheDocument());
   });
+
+  it("disables editing for read-only cluster-scoped kinds", async () => {
+    render(
+      <MemoryRouter initialEntries={["/edit/nodes/-/mynode"]}>
+        <Routes>
+          <Route path="/edit/:kind/:namespace/:name" element={<YamlEditorPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toBeInTheDocument());
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(screen.getByText("Apply")).toBeDisabled();
+    expect(screen.getByText("Reset")).toBeDisabled();
+  });
 });

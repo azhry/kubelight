@@ -22,6 +22,7 @@ export function YamlEditorPage() {
     resetYaml,
   } = useYamlEditor(kind, namespace, name);
 
+  const readOnly = ["nodes", "events", "ingressclasses"].includes(kind);
   const displayNamespace = namespace === "-" ? "(cluster-scoped)" : namespace;
 
   return (
@@ -45,11 +46,16 @@ export function YamlEditorPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {readOnly && (
+            <span className="font-label-sm text-label-sm text-on-surface-variant px-2 py-1 rounded bg-surface-container-high">
+              Read-only
+            </span>
+          )}
           <Button
             variant="outline"
             size="sm"
             onClick={resetYaml}
-            disabled={saving || !hasChanges}
+            disabled={saving || !hasChanges || readOnly}
             className="border-outline-variant text-on-surface hover:bg-surface-container-high"
           >
             <RotateCcw className="h-3 w-3 mr-1" />
@@ -58,7 +64,7 @@ export function YamlEditorPage() {
           <Button
             size="sm"
             onClick={apply}
-            disabled={saving || !hasChanges}
+            disabled={saving || !hasChanges || readOnly}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {saving ? (
@@ -81,7 +87,7 @@ export function YamlEditorPage() {
           <>
             <Card className="h-full flex flex-col border-outline-variant bg-surface-container rounded-lg overflow-hidden shadow-none">
               <CardContent className="flex-1 overflow-hidden p-0">
-                <CodeMirror value={yamlStr} onChange={setYamlStr} />
+                <CodeMirror value={yamlStr} onChange={setYamlStr} readOnly={readOnly} />
               </CardContent>
             </Card>
 
