@@ -31,6 +31,9 @@ describe("App routing", () => {
       { name: "minikube", cluster: "minikube", user: "minikube", active: true },
     ]);
     setMockInvoke("get_active_context", () => "minikube");
+    setMockInvoke("list_kubeconfigs", () => [
+      { id: "default", label: "default", path: "/home/user/.kube/config", active: true },
+    ]);
     setMockInvoke("get_resources", (args: any) => {
       if (args.kind === "namespaces") {
         return [{ name: "default" }, { name: "app" }];
@@ -147,6 +150,9 @@ describe("App auto-reconnect", () => {
       { name: "minikube", cluster: "minikube", user: "minikube", active: true },
     ]);
     setMockInvoke("get_active_context", () => "minikube");
+    setMockInvoke("list_kubeconfigs", () => [
+      { id: "default", label: "default", path: "/home/user/.kube/config", active: true },
+    ]);
     setMockInvoke("get_resources", (args: any) => {
       if (args.kind === "namespaces") {
         return [{ name: "default" }, { name: "app" }];
