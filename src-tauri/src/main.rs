@@ -141,6 +141,49 @@ async fn persist_sessions<R: Runtime>(
     save_settings(app, &settings)
 }
 
+async fn restore_sessions(
+    session_mgr: &SessionManager,
+    settings: StoredSettings,
+) -> Option<String> {
+    let mut added_any = false;
+    for stored in settings.sessions {
+        if std::path::Path::new(&stored.path).exists() {
+            if session_mgr
+                .add_with_id(stored.id, stored.path, stored.label)
+                .await
+                .is_ok()
+            {
+                added_any = true;
+            }
+        }
+    }
+    if !added_any {
+        return None;
+    }
+    let candidate = settings.active_session_id;
+    let validated = if let Some(id) = candidate {
+        if session_mgr.get(&id).await.is_some() {
+            Some(id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(id) = validated {
+        Some(id)
+    } else {
+        session_mgr.first_session_id().await
+    }
+}
+
+async fn restore_from_path(session_mgr: &SessionManager, path: String) -> Option<String> {
+    if !std::path::Path::new(&path).exists() {
+        return None;
+    }
+    session_mgr.add(path, "default".to_string()).await.ok()
+}
+
 async fn reload_kubeconfig_impl(
     state: Arc<RwLock<AppState>>,
     path: Option<String>,
@@ -617,61 +660,22 @@ fn main() {
                 app_handle.state::<Arc<RwLock<AppState>>>().inner().clone();
             tauri::async_runtime::spawn(async move {
                 let settings = load_settings(&app_handle);
-                let mut added_any = false;
-                for stored in settings.sessions {
-                    if std::path::Path::new(&stored.path).exists() {
-                        if state
-                            .read()
-                            .await
-                            .session_mgr
-                            .add_with_id(stored.id, stored.path, stored.label)
-                            .await
-                            .is_ok()
-                        {
-                            added_any = true;
-                        }
-                    }
-                }
-                if added_any {
-                    let candidate = settings.active_session_id.clone();
-                    let validated = if let Some(id) = candidate {
-                        let app = state.read().await;
-                        if app.session_mgr.get(&id).await.is_some() {
-                            Some(id)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    let active_id = if let Some(id) = validated {
-                        Some(id)
-                    } else {
-                        state.read().await.session_mgr.first_session_id().await
-                    };
-                    if let Some(id) = active_id {
-                        let active = state.read().await.active_session_id.clone();
-                        *active.write().await = Some(id);
-                    }
-                    let _ = persist_sessions(&app_handle, &*state.read().await).await;
+                let active_id = restore_sessions(&state.read().await.session_mgr, settings).await;
+                let active_id = if active_id.is_some() {
+                    active_id
                 } else {
                     let persisted_last = load_last_kubeconfig_path(&app_handle);
                     let candidate = persisted_last.or_else(default_kubeconfig_path);
                     if let Some(path) = candidate {
-                        if std::path::Path::new(&path).exists() {
-                            if let Ok(id) = state
-                                .read()
-                                .await
-                                .session_mgr
-                                .add(path.clone(), "default".to_string())
-                                .await
-                            {
-                                let active = state.read().await.active_session_id.clone();
-                                *active.write().await = Some(id);
-                                let _ = persist_sessions(&app_handle, &*state.read().await).await;
-                            }
-                        }
+                        restore_from_path(&state.read().await.session_mgr, path).await
+                    } else {
+                        None
                     }
+                };
+                if let Some(id) = active_id {
+                    let active = state.read().await.active_session_id.clone();
+                    *active.write().await = Some(id);
+                    let _ = persist_sessions(&app_handle, &*state.read().await).await;
                 }
             });
             Ok(())
@@ -1190,5 +1194,126 @@ spec:
         assert_eq!(list[0].id, id2);
 
         std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_restore_sessions_loads_persisted_sessions_and_keeps_active() {
+        let session_mgr = SessionManager::new();
+        let path = write_temp_config(sample_kubeconfig());
+        let path_str = path.to_str().unwrap().to_string();
+        let settings = StoredSettings {
+            sessions: vec![
+                StoredSession {
+                    id: "session-a".to_string(),
+                    label: "first".to_string(),
+                    path: path_str.clone(),
+                },
+                StoredSession {
+                    id: "session-b".to_string(),
+                    label: "second".to_string(),
+                    path: path_str.clone(),
+                },
+            ],
+            active_session_id: Some("session-b".to_string()),
+        };
+
+        let active_id = restore_sessions(&session_mgr, settings).await;
+
+        assert_eq!(active_id, Some("session-b".to_string()));
+        let list = session_mgr.list(active_id.as_deref()).await;
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().find(|s| s.id == "session-b").unwrap().active);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_restore_sessions_ignores_missing_files() {
+        let session_mgr = SessionManager::new();
+        let path = write_temp_config(sample_kubeconfig());
+        let settings = StoredSettings {
+            sessions: vec![
+                StoredSession {
+                    id: "missing".to_string(),
+                    label: "missing".to_string(),
+                    path: "/nonexistent/kubeconfig.yaml".to_string(),
+                },
+                StoredSession {
+                    id: "present".to_string(),
+                    label: "present".to_string(),
+                    path: path.to_str().unwrap().to_string(),
+                },
+            ],
+            active_session_id: Some("missing".to_string()),
+        };
+
+        let active_id = restore_sessions(&session_mgr, settings).await;
+
+        assert_eq!(active_id, Some("present".to_string()));
+        let list = session_mgr.list(active_id.as_deref()).await;
+        assert_eq!(list.len(), 1);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_restore_sessions_falls_back_to_first_when_active_missing() {
+        let session_mgr = SessionManager::new();
+        let path = write_temp_config(sample_kubeconfig());
+        let path_str = path.to_str().unwrap().to_string();
+        let settings = StoredSettings {
+            sessions: vec![StoredSession {
+                id: "only".to_string(),
+                label: "only".to_string(),
+                path: path_str,
+            }],
+            active_session_id: Some("unknown".to_string()),
+        };
+
+        let active_id = restore_sessions(&session_mgr, settings).await;
+
+        assert_eq!(active_id, Some("only".to_string()));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_restore_sessions_returns_none_when_empty() {
+        let session_mgr = SessionManager::new();
+        let settings = StoredSettings::default();
+
+        let active_id = restore_sessions(&session_mgr, settings).await;
+
+        assert!(active_id.is_none());
+        assert!(session_mgr.list(None).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_restore_from_path_creates_default_session() {
+        let session_mgr = SessionManager::new();
+        let path = write_temp_config(sample_kubeconfig());
+
+        let active_id = restore_from_path(&session_mgr, path.to_str().unwrap().to_string()).await;
+
+        assert!(active_id.is_some());
+        assert!(!session_mgr.list(None).await.is_empty());
+        let list = session_mgr.list(active_id.as_deref()).await;
+        assert_eq!(list[0].label, "default");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_restore_from_path_returns_none_for_missing_file() {
+        let session_mgr = SessionManager::new();
+
+        let active_id =
+            restore_from_path(&session_mgr, "/nonexistent/kubeconfig.yaml".to_string()).await;
+
+        assert!(active_id.is_none());
+        assert!(session_mgr.list(None).await.is_empty());
+    }
+
+    #[test]
+    fn test_default_kubeconfig_path_uses_home() {
+        // Default path should resolve to $HOME/.kube/config or $USERPROFILE\.kube\config.
+        let path = default_kubeconfig_path().unwrap();
+        assert!(path.ends_with(".kube/config") || path.ends_with(".kube\\config"));
     }
 }

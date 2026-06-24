@@ -132,8 +132,4 @@ impl SessionManager {
         }
         None
     }
-
-    pub async fn is_empty(&self) -> bool {
-        self.sessions.read().await.is_empty()
-    }
 }
