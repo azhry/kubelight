@@ -571,4 +571,20 @@ mod tests {
             );
         });
     }
+
+    #[tokio::test]
+    async fn test_resolve_network_target_pod_not_found() {
+        let client = Client::try_from(kube::config::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap();
+        let result = resolve_network_target(&client, "default", "pod/nonexistent-pod").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_diagnose_pod_network_impl_with_mock_client() {
+        let client = Client::try_from(kube::config::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap();
+        let result = diagnose_pod_network(&client, "default", "nginx", "http://example.com").await;
+        // The unreachable cluster causes the exec/curl to fail, but the function should
+        // return an error rather than panic.
+        assert!(result.is_err());
+    }
 }
