@@ -1472,4 +1472,12 @@ spec:
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
     }
+
+    #[tokio::test]
+    async fn test_diagnose_pod_network_command_without_client() {
+        let app = unconfigured_app_state();
+        let result = app.require_active_session().await;
+        assert!(result.is_err());
+        assert!(result.err().unwrap().contains("Kubeconfig not configured"));
+    }
 }
