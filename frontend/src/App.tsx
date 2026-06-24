@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ContextSelector } from "./components/context-selector";
 import { NamespaceFilter } from "./components/namespace-filter";
 import { Sidebar } from "./components/sidebar";
+import { KubeconfigMenu } from "./components/kubeconfig-menu";
 import { ToastContainer } from "./components/toast";
 import { KubeConfigSetup } from "./components/kube-config-setup";
 import { YamlEditorPanel } from "./components/yaml-editor-panel";
@@ -31,6 +32,7 @@ export function AppLayout() {
           </header>
 
           <div className="flex flex-1 overflow-hidden">
+            <KubeconfigMenu />
             <Sidebar />
             <main className="flex-1 overflow-hidden flex flex-col">
               <div className="flex-1 overflow-hidden">
