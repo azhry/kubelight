@@ -279,19 +279,13 @@ async fn get_last_kubeconfig_path(
     }
 }
 
-#[tauri::command]
-async fn list_kubeconfigs(
-    state: State<'_, Arc<RwLock<AppState>>>,
-) -> Result<Vec<KubeconfigSummary>, String> {
-    let app = state.read().await;
+async fn list_kubeconfigs_impl(app: &AppState) -> Vec<KubeconfigSummary> {
     let active_id = app.active_session_id.read().await.clone();
-    Ok(app.session_mgr.list(active_id.as_deref()).await)
+    app.session_mgr.list(active_id.as_deref()).await
 }
 
-#[tauri::command]
-async fn add_kubeconfig(
-    app_handle: tauri::AppHandle,
-    state: State<'_, Arc<RwLock<AppState>>>,
+async fn add_kubeconfig_impl(
+    app: &AppState,
     path: String,
     label: Option<String>,
 ) -> Result<String, String> {
@@ -301,17 +295,51 @@ async fn add_kubeconfig(
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| path.clone())
     });
+    let id = app.session_mgr.add(path, label).await?;
+    if app.active_session_id.read().await.is_none() {
+        *app.active_session_id.write().await = Some(id.clone());
+    }
+    Ok(id)
+}
+
+async fn remove_kubeconfig_impl(app: &AppState, id: String) -> Result<(), String> {
+    let active_id_before = app.active_session_id.read().await.clone();
+    app.session_mgr.remove(&id).await?;
+    if active_id_before.as_deref() == Some(&id) {
+        let new_active = app.session_mgr.first_session_id().await;
+        *app.active_session_id.write().await = new_active;
+    }
+    Ok(())
+}
+
+async fn switch_kubeconfig_impl(app: &AppState, id: String) -> Result<(), String> {
+    if app.session_mgr.get(&id).await.is_none() {
+        return Err(format!("Kubeconfig session '{}' not found", id));
+    }
+    *app.active_session_id.write().await = Some(id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_kubeconfigs(
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<Vec<KubeconfigSummary>, String> {
+    let app = state.read().await;
+    Ok(list_kubeconfigs_impl(&app).await)
+}
+
+#[tauri::command]
+async fn add_kubeconfig(
+    app_handle: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+    path: String,
+    label: Option<String>,
+) -> Result<String, String> {
     let state_arc = state.inner().clone();
     let id = {
         let app = state_arc.read().await;
-        app.session_mgr.add(path, label).await?
+        add_kubeconfig_impl(&app, path, label).await?
     };
-    {
-        let active_id = state_arc.read().await.active_session_id.clone();
-        if active_id.read().await.is_none() {
-            *active_id.write().await = Some(id.clone());
-        }
-    }
     let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
     Ok(id)
 }
@@ -323,19 +351,9 @@ async fn remove_kubeconfig(
     id: String,
 ) -> Result<(), String> {
     let state_arc = state.inner().clone();
-    let active_id_before = {
-        let app = state_arc.read().await;
-        let id = app.active_session_id.read().await.clone();
-        id
-    };
     {
         let app = state_arc.read().await;
-        app.session_mgr.remove(&id).await?;
-    }
-    if active_id_before.as_deref() == Some(&id) {
-        let new_active = state_arc.read().await.session_mgr.first_session_id().await;
-        let active_id = state_arc.read().await.active_session_id.clone();
-        *active_id.write().await = new_active;
+        remove_kubeconfig_impl(&app, id).await?;
     }
     let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
     Ok(())
@@ -350,13 +368,7 @@ async fn switch_kubeconfig(
     let state_arc = state.inner().clone();
     {
         let app = state_arc.read().await;
-        if app.session_mgr.get(&id).await.is_none() {
-            return Err(format!("Kubeconfig session '{}' not found", id));
-        }
-    }
-    {
-        let active_id = state_arc.read().await.active_session_id.clone();
-        *active_id.write().await = Some(id);
+        switch_kubeconfig_impl(&app, id).await?;
     }
     let _ = persist_sessions(&app_handle, &*state_arc.read().await).await;
     Ok(())
@@ -1315,5 +1327,149 @@ spec:
         // Default path should resolve to $HOME/.kube/config or $USERPROFILE\.kube\config.
         let path = default_kubeconfig_path().unwrap();
         assert!(path.ends_with(".kube/config") || path.ends_with(".kube\\config"));
+    }
+
+    #[tokio::test]
+    async fn test_list_kubeconfigs_impl_lists_sessions() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
+        let id = app.session_mgr.first_session_id().await.unwrap();
+        *app.active_session_id.write().await = Some(id.clone());
+
+        let list = list_kubeconfigs_impl(&app).await;
+        assert_eq!(list.len(), 1);
+        assert!(list[0].active);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_add_kubeconfig_impl_adds_session_and_sets_active() {
+        let app = unconfigured_app_state();
+        let path = write_temp_config(sample_kubeconfig());
+
+        let id = add_kubeconfig_impl(
+            &app,
+            path.to_str().unwrap().to_string(),
+            Some("custom".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(app.active_session_id.read().await.as_deref(), Some(id.as_str()));
+        let list = app.session_mgr.list(Some(&id)).await;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].label, "custom");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_add_kubeconfig_impl_keeps_existing_active() {
+        let path1 = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path1.to_str().unwrap()).await;
+        let first_id = app.active_session_id.read().await.clone().unwrap();
+        let path2 = write_temp_config(sample_kubeconfig());
+
+        let second_id = add_kubeconfig_impl(
+            &app,
+            path2.to_str().unwrap().to_string(),
+            Some("second".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_ne!(first_id, second_id);
+        assert_eq!(
+            app.active_session_id.read().await.as_deref(),
+            Some(first_id.as_str())
+        );
+        std::fs::remove_file(path1).ok();
+        std::fs::remove_file(path2).ok();
+    }
+
+    #[tokio::test]
+    async fn test_add_kubeconfig_impl_defaults_label_to_file_stem() {
+        let app = unconfigured_app_state();
+        let path = write_temp_config(sample_kubeconfig());
+
+        let id = add_kubeconfig_impl(&app, path.to_str().unwrap().to_string(), None)
+            .await
+            .unwrap();
+
+        let list = app.session_mgr.list(Some(&id)).await;
+        // The temp file name starts with "kubeconfig-be012" followed by process/pid/counter.
+        assert!(list[0].label.starts_with("kubeconfig"));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_remove_kubeconfig_impl_removes_session() {
+        let path = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path.to_str().unwrap()).await;
+        let id = app.session_mgr.first_session_id().await.unwrap();
+
+        remove_kubeconfig_impl(&app, id.clone()).await.unwrap();
+
+        assert!(app.session_mgr.list(None).await.is_empty());
+        assert!(app.active_session_id.read().await.is_none());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn test_remove_kubeconfig_impl_switches_active_when_removing_active() {
+        let path1 = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path1.to_str().unwrap()).await;
+        let path2 = write_temp_config(sample_kubeconfig());
+        let first_id = app.session_mgr.first_session_id().await.unwrap();
+        let second_id = app
+            .session_mgr
+            .add(path2.to_str().unwrap().to_string(), "second".to_string())
+            .await
+            .unwrap();
+        *app.active_session_id.write().await = Some(second_id.clone());
+
+        remove_kubeconfig_impl(&app, second_id.clone()).await.unwrap();
+
+        assert_eq!(
+            app.active_session_id.read().await.as_deref(),
+            Some(first_id.as_str())
+        );
+        let list = app.session_mgr.list(app.active_session_id.read().await.as_deref()).await;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, first_id);
+        std::fs::remove_file(path1).ok();
+        std::fs::remove_file(path2).ok();
+    }
+
+    #[tokio::test]
+    async fn test_switch_kubeconfig_impl_switches_active() {
+        let path1 = write_temp_config(sample_kubeconfig());
+        let app = app_state_with_config(path1.to_str().unwrap()).await;
+        let path2 = write_temp_config(sample_kubeconfig());
+        let first_id = app.session_mgr.first_session_id().await.unwrap();
+        let second_id = app
+            .session_mgr
+            .add(path2.to_str().unwrap().to_string(), "second".to_string())
+            .await
+            .unwrap();
+        *app.active_session_id.write().await = Some(first_id.clone());
+
+        switch_kubeconfig_impl(&app, second_id.clone()).await.unwrap();
+
+        assert_eq!(
+            app.active_session_id.read().await.as_deref(),
+            Some(second_id.as_str())
+        );
+        std::fs::remove_file(path1).ok();
+        std::fs::remove_file(path2).ok();
+    }
+
+    #[tokio::test]
+    async fn test_switch_kubeconfig_impl_not_found() {
+        let app = unconfigured_app_state();
+
+        let result = switch_kubeconfig_impl(&app, "missing".to_string()).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
     }
 }
