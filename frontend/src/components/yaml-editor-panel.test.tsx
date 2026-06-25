@@ -108,4 +108,91 @@ describe("YamlEditorPanel", () => {
 
     await waitFor(() => expect(screen.queryByTestId("yaml-editor")).not.toBeInTheDocument());
   });
+
+  it("shows a loading state while YAML is being fetched", async () => {
+    setMockInvoke("get_resource_yaml", () => new Promise(() => {}));
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <YamlEditorPanel />
+        <OpenButton kind="pods" namespace="default" name="nginx" />
+      </Wrapper>
+    );
+
+    await user.click(screen.getByText("Open"));
+    await waitFor(() => expect(screen.getByText("Edit YAML")).toBeInTheDocument());
+    expect(screen.getByText("pods / default / nginx")).toBeInTheDocument();
+    expect(screen.queryByTestId("yaml-editor")).not.toBeInTheDocument();
+  });
+
+  it("shows an error bar when apply_resource fails", async () => {
+    setMockInvoke("apply_resource", () => { throw new Error("apply failed"); });
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <YamlEditorPanel />
+        <OpenButton kind="pods" namespace="default" name="nginx" />
+      </Wrapper>
+    );
+
+    await user.click(screen.getByText("Open"));
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toBeInTheDocument());
+
+    const editor = screen.getByTestId("yaml-editor");
+    await user.clear(editor);
+    await user.type(editor, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx-2");
+
+    await user.click(screen.getByText("Apply"));
+    await waitFor(() => expect(screen.getByText(/apply failed/i)).toBeInTheDocument());
+  });
+
+  it("shows a read-only indicator for node resources", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <YamlEditorPanel />
+        <OpenButton kind="nodes" namespace="default" name="my-node" />
+      </Wrapper>
+    );
+
+    await user.click(screen.getByText("Open"));
+    await waitFor(() => expect(screen.getByText("Read-only")).toBeInTheDocument());
+  });
+
+  it("reset reverts to original YAML", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <YamlEditorPanel />
+        <OpenButton kind="pods" namespace="default" name="nginx" />
+      </Wrapper>
+    );
+
+    await user.click(screen.getByText("Open"));
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toHaveValue("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx"));
+
+    const editor = screen.getByTestId("yaml-editor");
+    await user.clear(editor);
+    await user.type(editor, "changed");
+
+    await waitFor(() => expect(screen.getByText("Reset")).toBeInTheDocument());
+    await user.click(screen.getByText("Reset"));
+
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toHaveValue("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx"));
+  });
+
+  it("shows Apply as disabled when there are no changes", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <YamlEditorPanel />
+        <OpenButton kind="pods" namespace="default" name="nginx" />
+      </Wrapper>
+    );
+
+    await user.click(screen.getByText("Open"));
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toBeInTheDocument());
+
+    expect(screen.getByText("Apply").closest("button")).toBeDisabled();
+  });
 });
