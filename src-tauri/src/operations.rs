@@ -1,6 +1,7 @@
-use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::{ConfigMap, Pod, Secret, Service};
-use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::batch::v1::{CronJob, Job};
+use k8s_openapi::api::core::v1::{ConfigMap, Event, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service};
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
 use kube::api::{Api, AttachParams, Patch, PatchParams, PostParams};
 use kube::Client;
 use serde::Serialize;
@@ -15,52 +16,72 @@ enum ResourceApi {
     ConfigMaps(Api<ConfigMap>),
     Secrets(Api<Secret>),
     Ingresses(Api<Ingress>),
+    Nodes(Api<Node>),
+    Namespaces(Api<Namespace>),
+    Events(Api<Event>),
+    IngressClasses(Api<IngressClass>),
+    DaemonSets(Api<DaemonSet>),
+    StatefulSets(Api<StatefulSet>),
+    Jobs(Api<Job>),
+    CronJobs(Api<CronJob>),
+    PersistentVolumes(Api<PersistentVolume>),
+    PersistentVolumeClaims(Api<PersistentVolumeClaim>),
 }
 
 fn resource_api(client: &Client, kind: &str, namespace: Option<&str>) -> Result<ResourceApi, String> {
     match kind.to_lowercase().as_str() {
-        "pods" | "pod" => {
-            let api = match namespace {
-                Some(ns) => Api::namespaced(client.clone(), ns),
-                None => Api::all(client.clone()),
-            };
-            Ok(ResourceApi::Pods(api))
-        }
-        "deployments" | "deployment" => {
-            let api = match namespace {
-                Some(ns) => Api::namespaced(client.clone(), ns),
-                None => Api::all(client.clone()),
-            };
-            Ok(ResourceApi::Deployments(api))
-        }
-        "services" | "service" => {
-            let api = match namespace {
-                Some(ns) => Api::namespaced(client.clone(), ns),
-                None => Api::all(client.clone()),
-            };
-            Ok(ResourceApi::Services(api))
-        }
-        "configmaps" | "configmap" => {
-            let api = match namespace {
-                Some(ns) => Api::namespaced(client.clone(), ns),
-                None => Api::all(client.clone()),
-            };
-            Ok(ResourceApi::ConfigMaps(api))
-        }
-        "secrets" | "secret" => {
-            let api = match namespace {
-                Some(ns) => Api::namespaced(client.clone(), ns),
-                None => Api::all(client.clone()),
-            };
-            Ok(ResourceApi::Secrets(api))
-        }
-        "ingresses" | "ingress" => {
-            let api = match namespace {
-                Some(ns) => Api::namespaced(client.clone(), ns),
-                None => Api::all(client.clone()),
-            };
-            Ok(ResourceApi::Ingresses(api))
-        }
+        "pods" | "pod" => Ok(ResourceApi::Pods(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "deployments" | "deployment" => Ok(ResourceApi::Deployments(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "services" | "service" => Ok(ResourceApi::Services(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "configmaps" | "configmap" => Ok(ResourceApi::ConfigMaps(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "secrets" | "secret" => Ok(ResourceApi::Secrets(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "ingresses" | "ingress" => Ok(ResourceApi::Ingresses(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "nodes" | "node" => Ok(ResourceApi::Nodes(Api::all(client.clone()))),
+        "namespaces" | "namespace" => Ok(ResourceApi::Namespaces(Api::all(client.clone()))),
+        "events" | "event" => Ok(ResourceApi::Events(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "ingressclasses" | "ingressclass" => Ok(ResourceApi::IngressClasses(Api::all(client.clone()))),
+        "daemonsets" | "daemonset" => Ok(ResourceApi::DaemonSets(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "statefulsets" | "statefulset" => Ok(ResourceApi::StatefulSets(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "jobs" | "job" => Ok(ResourceApi::Jobs(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "cronjobs" | "cronjob" => Ok(ResourceApi::CronJobs(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
+        "persistentvolumes" | "persistentvolume" | "pv" => Ok(ResourceApi::PersistentVolumes(Api::all(client.clone()))),
+        "persistentvolumeclaims" | "persistentvolumeclaim" | "pvc" => Ok(ResourceApi::PersistentVolumeClaims(match namespace {
+            Some(ns) => Api::namespaced(client.clone(), ns),
+            None => Api::all(client.clone()),
+        })),
         _ => Err(format!("Unsupported resource kind: {}", kind)),
     }
 }
@@ -73,6 +94,16 @@ async fn get_resource_value(api: &ResourceApi, name: &str) -> Result<Value, kube
         ResourceApi::ConfigMaps(a) => a.get(name).await.map(serialize_resource),
         ResourceApi::Secrets(a) => a.get(name).await.map(serialize_resource),
         ResourceApi::Ingresses(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Nodes(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Namespaces(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Events(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::IngressClasses(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::DaemonSets(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::StatefulSets(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::Jobs(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::CronJobs(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::PersistentVolumes(a) => a.get(name).await.map(serialize_resource),
+        ResourceApi::PersistentVolumeClaims(a) => a.get(name).await.map(serialize_resource),
     }
 }
 
@@ -89,6 +120,16 @@ async fn patch_resource_value(
         ResourceApi::ConfigMaps(a) => a.patch(name, params, patch).await.map(serialize_resource),
         ResourceApi::Secrets(a) => a.patch(name, params, patch).await.map(serialize_resource),
         ResourceApi::Ingresses(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Nodes(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Namespaces(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Events(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::IngressClasses(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::DaemonSets(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::StatefulSets(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::Jobs(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::CronJobs(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::PersistentVolumes(a) => a.patch(name, params, patch).await.map(serialize_resource),
+        ResourceApi::PersistentVolumeClaims(a) => a.patch(name, params, patch).await.map(serialize_resource),
     }
 }
 
@@ -120,6 +161,10 @@ pub async fn patch_resource(
         .map_err(|e| format!("Patch failed: {}", e))
 }
 
+fn parse_replace<T: serde::de::DeserializeOwned>(value: Value, label: &str) -> Result<T, String> {
+    serde_json::from_value(value).map_err(|e| format!("Invalid {} YAML: {}", label, e))
+}
+
 async fn replace_resource_value(
     api: &ResourceApi,
     name: &str,
@@ -128,27 +173,67 @@ async fn replace_resource_value(
 ) -> Result<Value, String> {
     match api {
         ResourceApi::Pods(a) => {
-            let data: Pod = serde_json::from_value(value).map_err(|e| format!("Invalid Pod YAML: {}", e))?;
+            let data = parse_replace::<Pod>(value, "Pod")?;
             a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
         }
         ResourceApi::Deployments(a) => {
-            let data: Deployment = serde_json::from_value(value).map_err(|e| format!("Invalid Deployment YAML: {}", e))?;
+            let data = parse_replace::<Deployment>(value, "Deployment")?;
             a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
         }
         ResourceApi::Services(a) => {
-            let data: Service = serde_json::from_value(value).map_err(|e| format!("Invalid Service YAML: {}", e))?;
+            let data = parse_replace::<Service>(value, "Service")?;
             a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
         }
         ResourceApi::ConfigMaps(a) => {
-            let data: ConfigMap = serde_json::from_value(value).map_err(|e| format!("Invalid ConfigMap YAML: {}", e))?;
+            let data = parse_replace::<ConfigMap>(value, "ConfigMap")?;
             a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
         }
         ResourceApi::Secrets(a) => {
-            let data: Secret = serde_json::from_value(value).map_err(|e| format!("Invalid Secret YAML: {}", e))?;
+            let data = parse_replace::<Secret>(value, "Secret")?;
             a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
         }
         ResourceApi::Ingresses(a) => {
-            let data: Ingress = serde_json::from_value(value).map_err(|e| format!("Invalid Ingress YAML: {}", e))?;
+            let data = parse_replace::<Ingress>(value, "Ingress")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Nodes(a) => {
+            let data = parse_replace::<Node>(value, "Node")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Namespaces(a) => {
+            let data = parse_replace::<Namespace>(value, "Namespace")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Events(a) => {
+            let data = parse_replace::<Event>(value, "Event")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::IngressClasses(a) => {
+            let data = parse_replace::<IngressClass>(value, "IngressClass")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::DaemonSets(a) => {
+            let data = parse_replace::<DaemonSet>(value, "DaemonSet")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::StatefulSets(a) => {
+            let data = parse_replace::<StatefulSet>(value, "StatefulSet")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::Jobs(a) => {
+            let data = parse_replace::<Job>(value, "Job")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::CronJobs(a) => {
+            let data = parse_replace::<CronJob>(value, "CronJob")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::PersistentVolumes(a) => {
+            let data = parse_replace::<PersistentVolume>(value, "PersistentVolume")?;
+            a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
+        }
+        ResourceApi::PersistentVolumeClaims(a) => {
+            let data = parse_replace::<PersistentVolumeClaim>(value, "PersistentVolumeClaim")?;
             a.replace(name, params, &data).await.map(serialize_resource).map_err(|e| e.to_string())
         }
     }
@@ -514,14 +599,22 @@ mod tests {
 
     #[test]
     fn test_resource_api_kind_dispatch() {
-        // resource_api requires a Client, but we can verify the supported kinds
-        // by testing a lightweight dispatcher used by the function.
         assert!(matches!(kind_to_api_group("pods"), Some(_)));
         assert!(matches!(kind_to_api_group("deployments"), Some(_)));
         assert!(matches!(kind_to_api_group("services"), Some(_)));
         assert!(matches!(kind_to_api_group("configmaps"), Some(_)));
         assert!(matches!(kind_to_api_group("secrets"), Some(_)));
         assert!(matches!(kind_to_api_group("ingresses"), Some(_)));
+        assert!(matches!(kind_to_api_group("nodes"), Some(_)));
+        assert!(matches!(kind_to_api_group("namespaces"), Some(_)));
+        assert!(matches!(kind_to_api_group("events"), Some(_)));
+        assert!(matches!(kind_to_api_group("ingressclasses"), Some(_)));
+        assert!(matches!(kind_to_api_group("daemonsets"), Some(_)));
+        assert!(matches!(kind_to_api_group("statefulsets"), Some(_)));
+        assert!(matches!(kind_to_api_group("jobs"), Some(_)));
+        assert!(matches!(kind_to_api_group("cronjobs"), Some(_)));
+        assert!(matches!(kind_to_api_group("pv"), Some(_)));
+        assert!(matches!(kind_to_api_group("pvc"), Some(_)));
         assert!(kind_to_api_group("unicorns").is_none());
     }
 
@@ -533,6 +626,16 @@ mod tests {
             "configmaps" | "configmap" => Some(""),
             "secrets" | "secret" => Some(""),
             "ingresses" | "ingress" => Some("networking.k8s.io"),
+            "nodes" | "node" => Some(""),
+            "namespaces" | "namespace" => Some(""),
+            "events" | "event" => Some(""),
+            "ingressclasses" | "ingressclass" => Some("networking.k8s.io"),
+            "daemonsets" | "daemonset" => Some("apps"),
+            "statefulsets" | "statefulset" => Some("apps"),
+            "jobs" | "job" => Some("batch"),
+            "cronjobs" | "cronjob" => Some("batch"),
+            "persistentvolumes" | "persistentvolume" | "pv" => Some(""),
+            "persistentvolumeclaims" | "persistentvolumeclaim" | "pvc" => Some(""),
             _ => None,
         }
     }
