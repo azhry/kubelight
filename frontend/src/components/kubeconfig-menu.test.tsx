@@ -56,7 +56,7 @@ describe("KubeconfigMenu", () => {
 
     const input = screen.getByPlaceholderText("Path...");
     fireEvent.change(input, { target: { value: "/home/user/.kube/config-c" } });
-    fireEvent.click(screen.getByRole("button", { name: "" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add kubeconfig" }));
 
     await waitFor(() =>
       expect(mockInvoke).toHaveBeenCalledWith(
@@ -94,7 +94,7 @@ describe("KubeconfigMenu", () => {
 
     const input = screen.getByPlaceholderText("Path...");
     fireEvent.change(input, { target: { value: "/bad/path" } });
-    fireEvent.click(screen.getByRole("button", { name: "" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add kubeconfig" }));
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Error: add failed", "error"));
   });
