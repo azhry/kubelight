@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { KubeconfigMenu } from "./kubeconfig-menu";
 import { setMockInvoke, mockInvoke } from "../test-utils/tauri-mocks";
@@ -64,5 +64,52 @@ describe("KubeconfigMenu", () => {
         expect.objectContaining({ path: "/home/user/.kube/config-c", label: null })
       )
     );
+  });
+
+  it("shows a loading spinner while sessions are being fetched", async () => {
+    setMockInvoke("list_kubeconfigs", () => new Promise(() => {}));
+    render(<KubeconfigMenu />);
+
+    const spinner = document.querySelector(".animate-spin");
+    expect(spinner).toBeInTheDocument();
+    expect(screen.queryByText("config-a")).not.toBeInTheDocument();
+  });
+
+  it("shows an error toast when list_kubeconfigs fails", async () => {
+    setMockInvoke("list_kubeconfigs", () => { throw new Error("failed to list"); });
+    const { toast } = await import("./toast");
+
+    render(<KubeconfigMenu />);
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Error: failed to list", "error"));
+  });
+
+  it("shows an error toast when add_kubeconfig fails", async () => {
+    setMockInvoke("add_kubeconfig", () => { throw new Error("add failed"); });
+    const { toast } = await import("./toast");
+
+    render(<KubeconfigMenu />);
+
+    await waitFor(() => expect(screen.getByText("config-a")).toBeInTheDocument());
+
+    const input = screen.getByPlaceholderText("Path...");
+    fireEvent.change(input, { target: { value: "/bad/path" } });
+    fireEvent.click(screen.getByRole("button", { name: "" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Error: add failed", "error"));
+  });
+
+  it("shows an error toast when remove_kubeconfig fails", async () => {
+    setMockInvoke("remove_kubeconfig", () => { throw new Error("remove failed"); });
+    const { toast } = await import("./toast");
+
+    render(<KubeconfigMenu />);
+
+    await waitFor(() => expect(screen.getByText("config-a")).toBeInTheDocument());
+
+    const removeButtons = screen.getAllByTitle("Remove kubeconfig");
+    fireEvent.click(removeButtons[0]);
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Error: remove failed", "error"));
   });
 });
