@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { ScrollText, Terminal, Activity, Code, Info } from "lucide-react";
+import { ScrollText, Terminal, Activity, Code, Info, ArrowRightLeft } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { StatusBadge } from "./status-badge";
 import { LogViewer } from "./log-viewer";
 import { NetworkDiagnostics } from "./network-diagnostics";
+import { PortForward } from "./port-forward";
 import { useLogStream } from "../hooks/use-log-stream";
 import { useExec } from "../hooks/use-exec";
 import { useYamlEditor } from "../hooks/use-yaml-editor";
@@ -18,11 +19,11 @@ interface PodDetailTabsProps {
   onClose?: () => void;
 }
 
-export function PodDetailTabs({ resource }: PodDetailTabsProps) {
+export function PodDetailTabs({ resource, onClose }: PodDetailTabsProps) {
   const namespace = resource.namespace || "default";
   const podName = resource.name;
 
-  const [activeTab, setActiveTab] = useState<"details" | "logs" | "terminal" | "diagnostics" | "yaml">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "logs" | "terminal" | "diagnostics" | "yaml" | "portforward">("details");
   const { logs, streaming, startStream, stopStream, clearLogs } = useLogStream(namespace, podName);
   const { output, running: execRunning, exec, execShell, clearOutput } = useExec(namespace, podName);
   const { yamlStr, loading: yamlLoading, error: yamlError } = useYamlEditor("pods", namespace, podName);
@@ -75,6 +76,7 @@ export function PodDetailTabs({ resource }: PodDetailTabsProps) {
         <TabButton tab="logs" label="Logs" icon={ScrollText} />
         <TabButton tab="terminal" label="Terminal" icon={Terminal} />
         <TabButton tab="diagnostics" label="Diagnostics" icon={Activity} />
+        <TabButton tab="portforward" label="Port Forward" icon={ArrowRightLeft} />
         <TabButton tab="yaml" label="YAML" icon={Code} />
       </div>
 
@@ -202,6 +204,10 @@ export function PodDetailTabs({ resource }: PodDetailTabsProps) {
 
         {activeTab === "diagnostics" && (
           <NetworkDiagnostics namespace={namespace} podName={podName} />
+        )}
+
+        {activeTab === "portforward" && (
+          <PortForward namespace={namespace} podName={podName} />
         )}
 
         {activeTab === "yaml" && (
