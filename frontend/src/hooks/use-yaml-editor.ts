@@ -9,9 +9,15 @@ export function useYamlEditor(kind: string, namespace: string | undefined, name:
   const [error, setError] = useState<string | null>(null);
 
   const fetchYaml = useCallback(async () => {
-    if (!name) return;
+    if (!name) {
+      setYamlStr("");
+      setOriginalYaml("");
+      return;
+    }
     setLoading(true);
     setError(null);
+    setYamlStr("");
+    setOriginalYaml("");
     try {
       const result = await invoke<string>("get_resource_yaml", {
         kind,
