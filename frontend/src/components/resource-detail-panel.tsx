@@ -14,6 +14,7 @@ function YamlView({ kind, namespace, name }: { kind: string; namespace: string; 
   if (loading) {
     return (
       <div className="space-y-3 p-4">
+        <p className="text-sm text-on-surface-variant">Loading YAML...</p>
         <Skeleton className="h-6 w-1/3 rounded" />
         <Skeleton className="h-64 rounded" />
       </div>
