@@ -76,7 +76,7 @@ export function ResourceDetailPanel() {
 
   if (!resource) return null;
 
-  const isPod = resource.kind === "pods";
+  const isPod = resource.kind.toLowerCase().startsWith("pod");
   const displayNamespace = resource.namespace || "-";
 
   return (
