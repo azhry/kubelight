@@ -133,6 +133,7 @@ export function KubeconfigMenu() {
           size="sm"
           disabled={adding || !newPath.trim()}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
+          aria-label="Add kubeconfig"
         >
           {adding ? (
             <Loader2 className="h-4 w-4 animate-spin" />

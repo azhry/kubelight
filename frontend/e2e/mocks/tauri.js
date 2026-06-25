@@ -1,14 +1,23 @@
 (function () {
-  var saved = {};
-  try { saved = JSON.parse(window.name); } catch (e) {}
-  var handlers = saved.handlers || {};
-  var eventIdCounter = saved.eventIdCounter || 0;
+  var saved = window.__TAURI_MOCK_STATE__ || {};
 
-  function save() {
-    try {
-      window.name = JSON.stringify({ handlers: handlers, eventIdCounter: eventIdCounter });
-    } catch (e) {}
+  function restoreFn(obj) {
+    if (obj && obj.__fn === true) {
+      try { return new Function("args", "return (" + obj.body + ")(args)"); } catch (e) { return obj.body; }
+    }
+    return obj;
   }
+
+  var handlers = {};
+  if (saved.handlers) {
+    for (var k in saved.handlers) {
+      if (saved.handlers.hasOwnProperty(k)) {
+        var h = restoreFn(saved.handlers[k]);
+        handlers[k] = typeof h === "function" ? h : (function(v) { return function() { return v; }; })(h);
+      }
+    }
+  }
+  var eventIdCounter = saved.eventIdCounter || 0;
 
   function eventBus(event, payload) {
     var evtHandlers = handlers["__event__"];
@@ -39,7 +48,6 @@
       if (!handlers["__event__"][event]) handlers["__event__"][event] = [];
       var id = ++eventIdCounter;
       handlers["__event__"][event].push({ id: id, cb: cb });
-      save();
       return Promise.resolve(function () {
         var arr = handlers["__event__"][event];
         if (arr) {
@@ -48,7 +56,6 @@
             if (arr[j].id === id) { idx = j; break; }
           }
           if (idx >= 0) arr.splice(idx, 1);
-          save();
         }
       });
     },
@@ -61,22 +68,18 @@
   window.__TAURI_MOCK__ = {
     setHandler: function (cmd, handler) {
       handlers[cmd] = handler;
-      save();
     },
     setResponse: function (cmd, response) {
       handlers[cmd] = function () { return response; };
-      save();
     },
     getHandler: function (cmd) { return handlers[cmd]; },
     emitEvent: function (event, payload) { eventBus(event, payload); },
     reset: function () {
       handlers = {};
       eventIdCounter = 0;
-      save();
     },
   };
 
-  // Default responses (overridable via setResponse before navigation)
   if (!handlers["get_kubeconfig_status"]) {
     window.__TAURI_MOCK__.setResponse("get_kubeconfig_status", {
       configured: true,

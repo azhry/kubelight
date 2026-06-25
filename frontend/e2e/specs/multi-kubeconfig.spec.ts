@@ -17,7 +17,7 @@ test.describe("Multi-Kubeconfig", () => {
   test("kubeconfig menu shows session list", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("list_kubeconfigs", sampleKubeconfigSessions);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("KubeLight").first()).toBeVisible();
 
     await expect(page.getByText("minikube").first()).toBeVisible();
@@ -26,7 +26,7 @@ test.describe("Multi-Kubeconfig", () => {
   test("add kubeconfig form is accessible", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("list_kubeconfigs", sampleKubeconfigSessions);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
 
     await expect(page.getByPlaceholder("Path...")).toBeVisible();
   });
@@ -37,7 +37,7 @@ test.describe("Multi-Kubeconfig", () => {
     await tauriMock.setResponse("remove_kubeconfig", null);
     await tauriMock.setResponse("switch_kubeconfig", null);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("KubeLight").first()).toBeVisible();
 
     await page.getByPlaceholder("Path...").fill("C:\\Users\\dev\\.kube\\prod-config");

@@ -19,3 +19,7 @@ Thumbs.db
 .env
 .env.local
 node_modules
+
+# Test artifacts
+frontend/test-output/
+frontend/test-results/

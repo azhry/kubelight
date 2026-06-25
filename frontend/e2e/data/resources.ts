@@ -1,6 +1,6 @@
 export const samplePods = [
   {
-    kind: "Pod",
+    kind: "pods",
     name: "nginx-frontend",
     namespace: "default",
     api_version: "v1",
@@ -8,7 +8,7 @@ export const samplePods = [
     status: "Running",
   },
   {
-    kind: "Pod",
+    kind: "pods",
     name: "api-server",
     namespace: "default",
     api_version: "v1",
@@ -16,7 +16,7 @@ export const samplePods = [
     status: "Running",
   },
   {
-    kind: "Pod",
+    kind: "pods",
     name: "redis-cache",
     namespace: "default",
     api_version: "v1",
@@ -24,7 +24,7 @@ export const samplePods = [
     status: "Running",
   },
   {
-    kind: "Pod",
+    kind: "pods",
     name: "pending-job",
     namespace: "staging",
     api_version: "v1",
@@ -32,7 +32,7 @@ export const samplePods = [
     status: "Pending",
   },
   {
-    kind: "Pod",
+    kind: "pods",
     name: "crash-loop-backoff",
     namespace: "default",
     api_version: "v1",
@@ -43,7 +43,7 @@ export const samplePods = [
 
 export const sampleDeployments = [
   {
-    kind: "Deployment",
+    kind: "deployments",
     name: "api",
     namespace: "default",
     api_version: "apps/v1",
@@ -51,7 +51,7 @@ export const sampleDeployments = [
     status: "3/3",
   },
   {
-    kind: "Deployment",
+    kind: "deployments",
     name: "web",
     namespace: "default",
     api_version: "apps/v1",
@@ -62,7 +62,7 @@ export const sampleDeployments = [
 
 export const sampleServices = [
   {
-    kind: "Service",
+    kind: "services",
     name: "api-svc",
     namespace: "default",
     api_version: "v1",
@@ -70,7 +70,7 @@ export const sampleServices = [
     status: "ClusterIP",
   },
   {
-    kind: "Service",
+    kind: "services",
     name: "web-svc",
     namespace: "default",
     api_version: "v1",
@@ -81,7 +81,7 @@ export const sampleServices = [
 
 export const sampleNodes = [
   {
-    kind: "Node",
+    kind: "nodes",
     name: "minikube",
     namespace: "",
     api_version: "v1",

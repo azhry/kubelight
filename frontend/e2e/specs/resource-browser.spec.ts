@@ -18,7 +18,7 @@ test.describe("Resource Browser", () => {
   test("lists pods in the resource table", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("get_resources", samplePods);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     for (const pod of samplePods) {
@@ -31,7 +31,7 @@ test.describe("Resource Browser", () => {
   test("navigates between resource kinds via sidebar", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("get_resources", samplePods);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     await tauriMock.setResponse("get_resources", sampleDeployments);
@@ -48,24 +48,24 @@ test.describe("Resource Browser", () => {
       throw new Error("Connection refused");
     });
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Failed to load pods")).toBeVisible();
   });
 
   test("shows empty state when no resources exist", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("get_resources", []);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("No pods found")).toBeVisible();
   });
 
   test("sorts resources by name when clicking column header", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("get_resources", samplePods);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
-    const nameHeader = page.getByRole("columnheader", { name: /name/i });
+    const nameHeader = page.getByRole("columnheader", { name: "Name", exact: true });
     await nameHeader.click();
     await page.waitForTimeout(300);
 
@@ -76,7 +76,7 @@ test.describe("Resource Browser", () => {
     await tauriMock.setResponse("get_resources", samplePods);
     await tauriMock.setResponse("get_resource_yaml", "apiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: nginx-frontend");
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     await page.getByRole("cell", { name: "nginx-frontend" }).first().click();
@@ -88,7 +88,7 @@ test.describe("Resource Browser", () => {
   test("sidebar navigation highlights active resource kind", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("get_resources", samplePods);
 
-    await page.goto("/pods");
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     await tauriMock.setResponse("get_resources", sampleServices);

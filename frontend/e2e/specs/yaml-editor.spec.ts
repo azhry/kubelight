@@ -17,8 +17,8 @@ test.describe("YAML Editor", () => {
     await tauriMock.setResponse("get_resource_yaml", samplePodYaml);
   });
 
-  test("opens YAML editor panel when clicking edit button on a pod", async ({ page }) => {
-    await page.goto("/pods");
+  test("opens YAML editor panel when clicking edit button on a pod", async ({ page, tauriMock }) => {
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     const editButton = page.getByRole("button", { name: /edit yaml/i }).first();
@@ -30,10 +30,10 @@ test.describe("YAML Editor", () => {
 
   test("shows read-only badge for nodes", async ({ page, tauriMock }) => {
     await tauriMock.setResponse("get_resources", [
-      { kind: "Node", name: "minikube", namespace: "", api_version: "v1", age: "30d", status: "True" },
+      { kind: "nodes", name: "minikube", namespace: "", api_version: "v1", age: "30d", status: "True" },
     ]);
 
-    await page.goto("/nodes");
+    await tauriMock.navigate("/nodes");
     await expect(page.getByText("Nodes").first()).toBeVisible();
 
     const editButton = page.getByRole("button", { name: /view yaml/i }).first();
@@ -42,8 +42,8 @@ test.describe("YAML Editor", () => {
     await expect(page.getByText("Read-only")).toBeVisible();
   });
 
-  test("save button is disabled when there are no changes", async ({ page }) => {
-    await page.goto("/pods");
+  test("save button is disabled when there are no changes", async ({ page, tauriMock }) => {
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     const editButton = page.getByRole("button", { name: /edit yaml/i }).first();
@@ -51,8 +51,8 @@ test.describe("YAML Editor", () => {
     await expect(page.getByText("Edit YAML").first()).toBeVisible();
   });
 
-  test("reset button appears when YAML is edited", async ({ page }) => {
-    await page.goto("/pods");
+  test("reset button appears when YAML is edited", async ({ page, tauriMock }) => {
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     const editButton = page.getByRole("button", { name: /edit yaml/i }).first();
@@ -60,8 +60,8 @@ test.describe("YAML Editor", () => {
     await expect(page.getByText("Edit YAML").first()).toBeVisible();
   });
 
-  test("close button hides the YAML editor panel", async ({ page }) => {
-    await page.goto("/pods");
+  test("close button hides the YAML editor panel", async ({ page, tauriMock }) => {
+    await tauriMock.navigate("/pods");
     await expect(page.getByText("Pods").first()).toBeVisible();
 
     const editButton = page.getByRole("button", { name: /edit yaml/i }).first();
