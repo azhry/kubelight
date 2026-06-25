@@ -51,4 +51,51 @@ describe("NetworkDiagnostics", () => {
       expect(screen.getByText(/connection refused/i)).toBeInTheDocument()
     );
   });
+
+  it("shows the empty state before any diagnostic is run", () => {
+    render(<NetworkDiagnostics namespace="default" podName="nginx" />);
+
+    expect(screen.getByText(/Enter a target pod, service, or URL/i)).toBeInTheDocument();
+  });
+
+  it("clears the result when the Clear button is clicked", async () => {
+    render(<NetworkDiagnostics namespace="default" podName="nginx" />);
+
+    const input = screen.getByPlaceholderText(/target pod, service, or url/i);
+    fireEvent.change(input, { target: { value: "my-service" } });
+    fireEvent.click(screen.getByRole("button", { name: /run/i }));
+
+    await waitFor(() => expect(screen.getByText("HTTP/1.1 200 OK")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+
+    await waitFor(() => expect(screen.getByText(/Enter a target pod, service, or URL/i)).toBeInTheDocument());
+  });
+
+  it("shows a loading message while running the diagnostic", async () => {
+    setMockInvoke("diagnose_pod_network", () => new Promise(() => {}));
+
+    render(<NetworkDiagnostics namespace="default" podName="nginx" />);
+
+    const input = screen.getByPlaceholderText(/target pod, service, or url/i);
+    fireEvent.change(input, { target: { value: "my-service" } });
+    fireEvent.click(screen.getByRole("button", { name: /run/i }));
+
+    await waitFor(() => expect(screen.getByText(/Running curl from nginx/i)).toBeInTheDocument());
+  });
+
+  it("shows no output message when both stdout and stderr are empty", async () => {
+    setMockInvoke("diagnose_pod_network", () => ({
+      stdout: "",
+      stderr: "",
+    }));
+
+    render(<NetworkDiagnostics namespace="default" podName="nginx" />);
+
+    const input = screen.getByPlaceholderText(/target pod, service, or url/i);
+    fireEvent.change(input, { target: { value: "silent-service" } });
+    fireEvent.click(screen.getByRole("button", { name: /run/i }));
+
+    await waitFor(() => expect(screen.getByText("No output returned.")).toBeInTheDocument());
+  });
 });

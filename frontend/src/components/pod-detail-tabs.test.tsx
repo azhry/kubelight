@@ -78,4 +78,41 @@ describe("PodDetailTabs", () => {
 
     expect(screen.getByPlaceholderText(/target pod, service, or url/i)).toBeInTheDocument();
   });
+
+  it("shows connecting message when terminal tab is first opened", async () => {
+    render(<PodDetailTabs resource={podResource} />);
+
+    fireEvent.click(screen.getByText("Terminal"));
+
+    await waitFor(() => expect(screen.getByText(/Connecting to nginx/i)).toBeInTheDocument());
+  });
+
+  it("renders exec output from events in the terminal tab", async () => {
+    render(<PodDetailTabs resource={podResource} />);
+
+    fireEvent.click(screen.getByText("Terminal"));
+    await waitFor(() => expect(screen.getByPlaceholderText("Run a command in nginx...")).toBeInTheDocument());
+
+    emitMockEvent("exec-output", { data: "total 42\n-rw-r--r-- 1 root root 1234 main.js\n" });
+
+    await waitFor(() => expect(screen.getByText(/total 42/)).toBeInTheDocument());
+    expect(screen.getByText(/main.js/)).toBeInTheDocument();
+  });
+
+  it("shows pod details by default", () => {
+    render(<PodDetailTabs resource={podResource} />);
+
+    expect(screen.getAllByText("nginx")[0]).toBeInTheDocument();
+    expect(screen.getByText("Pod · default")).toBeInTheDocument();
+    expect(screen.getByText("Resource Info")).toBeInTheDocument();
+    expect(screen.getByText("Status")).toBeInTheDocument();
+  });
+
+  it("renders the YAML tab with editor content", async () => {
+    render(<PodDetailTabs resource={podResource} />);
+
+    fireEvent.click(screen.getByText("YAML"));
+
+    await waitFor(() => expect(screen.getByTestId("yaml-editor")).toHaveValue("apiVersion: v1\nkind: Pod"));
+  });
 });
