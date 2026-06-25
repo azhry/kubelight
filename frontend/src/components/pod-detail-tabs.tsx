@@ -19,7 +19,7 @@ interface PodDetailTabsProps {
   onClose?: () => void;
 }
 
-export function PodDetailTabs({ resource, onClose }: PodDetailTabsProps) {
+export function PodDetailTabs({ resource, onClose: _onClose }: PodDetailTabsProps) {
   const namespace = resource.namespace || "default";
   const podName = resource.name;
 
